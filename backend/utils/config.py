@@ -14,6 +14,12 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3"
 
+    # Per-request LLM timeout. 120s is fine for a hosted API, but a local
+    # reasoning model on CPU can spend longer than that on a single call --
+    # measured at ~35s cold load plus ~77s generation for qwen3:4b -- so this
+    # needs to be raisable without editing code.
+    llm_timeout_seconds: int = 120
+
     # Analytics database: the data the user asks questions about. The agent only
     # ever issues SELECTs here; point it at a least-privilege read-only role.
     database_url: str = "postgresql+psycopg2://postgres:postgres@localhost:5432/analytics"

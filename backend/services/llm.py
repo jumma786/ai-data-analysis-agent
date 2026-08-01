@@ -31,9 +31,10 @@ class OpenAIProvider(LLMProvider):
 
 
 class OllamaProvider(LLMProvider):
-    def __init__(self, base_url: str, model: str):
+    def __init__(self, base_url: str, model: str, timeout: int = 120):
         self._base_url = base_url.rstrip("/")
         self._model = model
+        self._timeout = timeout
 
     def complete(self, system: str, user: str) -> str:
         import requests
@@ -42,7 +43,7 @@ class OllamaProvider(LLMProvider):
             json={"model": self._model, "stream": False,
                   "messages": [{"role": "system", "content": system},
                                {"role": "user", "content": user}]},
-            timeout=120,
+            timeout=self._timeout,
         )
         r.raise_for_status()
         return r.json()["message"]["content"]
@@ -52,6 +53,7 @@ def get_llm() -> LLMProvider:
     s = get_settings()
     if s.llm_provider == "ollama":
         logger.info("Using Ollama provider (%s)", s.ollama_model)
-        return OllamaProvider(s.ollama_base_url, s.ollama_model)
+        return OllamaProvider(s.ollama_base_url, s.ollama_model,
+                              timeout=s.llm_timeout_seconds)
     logger.info("Using OpenAI provider (%s)", s.openai_model)
     return OpenAIProvider(s.openai_api_key, s.openai_model)

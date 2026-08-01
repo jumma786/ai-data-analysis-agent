@@ -80,6 +80,22 @@ by `pytest tests/ -q` but always report as skipped there.
    deliberately not mocked there, since canned SQL would prove nothing about
    generation.
 
+   It has been run for real: with `LLM_PROVIDER=ollama`, `OLLAMA_MODEL=qwen3:4b`
+   and `LLM_TIMEOUT_SECONDS=900`, all three integration tests pass in ~3m17s.
+   Asked "total revenue by country" against the introspected schema, qwen3:4b
+   produced, unedited:
+
+   ```sql
+   SELECT country, SUM(revenue) AS total_revenue FROM online_retail
+   GROUP BY country ORDER BY total_revenue DESC LIMIT 10
+   ```
+
+   **Raise `LLM_TIMEOUT_SECONDS` for local models.** The 120s default is sized
+   for a hosted API. Measured on CPU, qwen3:4b needs ~35s to cold-load and ~77s
+   per generation, and the pipeline makes two sequential calls — so the default
+   times out. This is a hardware-dependent number, not a benchmark; measure your
+   own rather than trusting these figures.
+
 ## Known TODOs (be honest in interviews)
 - **Authorization**: authentication is done (signup/login/JWT dependency, see
   `backend/api/auth.py`) and every non-public route is guarded, but there are no

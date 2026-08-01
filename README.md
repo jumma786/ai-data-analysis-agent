@@ -116,10 +116,15 @@ and loads 1,047,877 rows; the validate → execute → chart path then returns r
 results on them. Caveat: that run used SQLite, so Postgres-specific behaviour is
 still unexercised — see docs/DEVELOPMENT_GUIDE.md for the recorded output.
 
-Wired but unverified in this repo's automated runs: the NL → SQL step, which
-needs a real LLM key or a local Ollama model. It is deliberately not mocked —
-a stubbed model returning SQL we wrote ourselves would not demonstrate
-generation. ChromaDB is still stubbed to the in-memory store.
+The NL → SQL step has been verified against a real model — not mocked. Running
+the integration suite with `LLM_PROVIDER=ollama` and `OLLAMA_MODEL=qwen3:4b`,
+all three tests pass; asked "total revenue by country", the model produced a
+correct aggregate query that passed validation and returned real rows. Note this
+is a single question against one small local model, which demonstrates the path
+works — it is not an accuracy measurement, and no such metric is claimed.
+
+Still unverified: Postgres specifically (the runs above used SQLite), and
+ChromaDB, which remains stubbed to the in-memory store.
 
 ## Docs
 - docs/ARCHITECTURE.md
