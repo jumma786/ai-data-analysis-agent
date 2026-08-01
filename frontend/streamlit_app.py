@@ -14,11 +14,56 @@ API_URL = os.getenv("API_URL", "http://localhost:8000")
 st.set_page_config(page_title="AI Data Analysis Agent", layout="wide")
 st.title("AI Data Analysis Agent")
 
+
+def auth_headers() -> dict[str, str]:
+    """Bearer header for the logged-in session, or empty if signed out."""
+    token = st.session_state.get("access_token")
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
+
+def _sidebar_auth() -> None:
+    """Minimal signup/login form.
+
+    /query, /chat, /upload and /generate-report require a token, so the UI needs
+    somewhere to get one. The token lives in Streamlit's per-session state; it is
+    not persisted across browser reloads.
+    """
+    with st.sidebar:
+        st.divider()
+        if st.session_state.get("access_token"):
+            st.caption(f"Signed in as {st.session_state.get('email', '?')}")
+            if st.button("Sign out"):
+                st.session_state.pop("access_token", None)
+                st.rerun()
+            return
+
+        st.caption("Sign in to use query, chat, upload and reports.")
+        email = st.text_input("Email", key="auth_email")
+        password = st.text_input("Password", type="password", key="auth_password")
+        col_login, col_signup = st.columns(2)
+
+        if col_login.button("Log in") and email and password:
+            r = requests.post(f"{API_URL}/auth/login",
+                              json={"email": email, "password": password})
+            if r.ok:
+                st.session_state.access_token = r.json()["access_token"]
+                st.session_state.email = email
+                st.rerun()
+            else:
+                st.error("Login failed. Check your email and password.")
+
+        if col_signup.button("Sign up") and email and password:
+            r = requests.post(f"{API_URL}/auth/signup",
+                              json={"email": email, "password": password})
+            st.success("Account created — now log in.") if r.ok else st.error(r.text)
+
+
 page = st.sidebar.radio(
     "Navigate",
     ["Dashboard", "Chat With Data", "Upload Dataset",
      "Database Connection", "Document Search", "Reports", "Settings"],
 )
+_sidebar_auth()
 
 if page == "Dashboard":
     st.subheader("Overview")
@@ -34,7 +79,8 @@ elif page == "Upload Dataset":
     f = st.file_uploader("Choose a file", type=["csv", "xlsx", "xls", "parquet"])
     if f and st.button("Profile dataset"):
         r = requests.post(f"{API_URL}/upload",
-                          files={"file": (f.name, f.getvalue())})
+                          files={"file": (f.name, f.getvalue())},
+                          headers=auth_headers())
         if r.ok:
             st.json(r.json())
         else:
@@ -46,7 +92,7 @@ elif page == "Database Connection":
                         "postgresql+psycopg2://user:pass@host:5432/db")
     if st.button("Connect"):
         r = requests.post(f"{API_URL}/connect-database",
-                          json={"database_url": url})
+                          json={"database_url": url}, headers=auth_headers())
         st.json(r.json()) if r.ok else st.error(r.text)
 
 elif page == "Chat With Data":
@@ -60,7 +106,7 @@ elif page == "Chat With Data":
         st.session_state.messages.append({"role": "user", "content": q})
         st.chat_message("user").write(q)
         payload = {"messages": st.session_state.messages}
-        r = requests.post(f"{API_URL}/chat", json=payload)
+        r = requests.post(f"{API_URL}/chat", json=payload, headers=auth_headers())
         if r.ok:
             data = r.json()
             if not data["valid"]:
@@ -83,7 +129,8 @@ elif page == "Reports":
     st.subheader("Generate a PDF report")
     q = st.text_input("Report question")
     if st.button("Generate") and q:
-        r = requests.post(f"{API_URL}/generate-report", json={"question": q})
+        r = requests.post(f"{API_URL}/generate-report", json={"question": q},
+                          headers=auth_headers())
         st.json(r.json()) if r.ok else st.error(r.text)
 
 elif page == "Settings":

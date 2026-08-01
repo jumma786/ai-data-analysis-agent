@@ -1,5 +1,6 @@
 """Pydantic request/response models for the API."""
-from pydantic import BaseModel
+from datetime import datetime
+from pydantic import BaseModel, EmailStr, Field
 from typing import Any, Optional
 
 
@@ -31,3 +32,32 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     messages: list[ChatMessage]
     schema_text: Optional[str] = ""
+
+
+# --- Authentication -------------------------------------------------------
+
+# 72 bytes is bcrypt's hard limit; enforcing it here turns a 500 into a 422 with
+# a readable message. The 8-character floor is a minimum, not a policy -- real
+# deployments should also check against a breached-password list.
+class SignupRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=72)
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=1, max_length=72)
+
+
+class UserResponse(BaseModel):
+    id: int
+    email: EmailStr
+    created_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int          # seconds until expiry
