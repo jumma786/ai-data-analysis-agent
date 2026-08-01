@@ -24,10 +24,22 @@ by `pytest tests/ -q` but always report as skipped there.
 
 ## End-to-end demo path (real data)
 
-1. **Start Postgres** (compose brings up just the `db` service):
+1. **Start Postgres.** Create `.env` first — `docker-compose.yml` declares
+   `env_file: .env` on the backend service, and Compose validates the whole file
+   even when you only target `db`, so without it the command fails with
+   `Failed to load .env`:
 
    ```bash
+   cp .env.example .env
    docker compose up -d db
+   ```
+
+   To skip Compose entirely (no `.env` needed):
+
+   ```bash
+   docker run -d --name adaa-pg -e POSTGRES_USER=postgres \
+     -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=analytics \
+     -p 5432:5432 postgres:16
    ```
 
 2. **Download the dataset** — UCI *Online Retail II*, `online_retail_II.xlsx`,
@@ -37,6 +49,7 @@ by `pytest tests/ -q` but always report as skipped there.
 3. **Load it**:
 
    ```bash
+   pip install psycopg2-binary   # if not already installed from requirements
    export DATABASE_URL="postgresql+psycopg2://postgres:postgres@localhost:5432/analytics"
    python scripts/load_online_retail.py /path/to/online_retail_II.xlsx
    ```
@@ -57,9 +70,9 @@ by `pytest tests/ -q` but always report as skipped there.
    `DATABASE_URL` from settings, while the tests connect directly via
    `INTEGRATION_DATABASE_URL`.
 
-   Recorded result of an actual run (2026-08-01), against
-   `online_retail_II.xlsx` — note this run used **SQLite**, not Postgres, so it
-   validates the loader and query logic but not Postgres-specific behaviour:
+   Recorded result of an actual run (2026-08-01) against `online_retail_II.xlsx`,
+   into Postgres 16. Byte-identical counts were produced by a SQLite run, so the
+   cleaning is driver-independent:
 
    ```
    Found 2 sheet(s): ['Year 2009-2010', 'Year 2010-2011']

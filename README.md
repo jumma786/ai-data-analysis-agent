@@ -83,6 +83,7 @@ download `online_retail_II.xlsx` from
 [UCI](https://archive.ics.uci.edu/dataset/502/online+retail+ii)):
 
 ```bash
+cp .env.example .env          # compose validates env_file even for `up db`
 docker compose up -d db
 export DATABASE_URL="postgresql+psycopg2://postgres:postgres@localhost:5432/analytics"
 python scripts/load_online_retail.py /path/to/online_retail_II.xlsx
@@ -110,21 +111,23 @@ data scoping, no token revocation/refresh, no login rate limiting, and the schem
 cache is shared across all users. `/connect-database` also remains an SSRF
 primitive for any logged-in user. See "Known gaps" in docs/API_DOCUMENTATION.md.
 
-Verified by the opt-in integration suite against the real dataset: the loader
-reads all 1,067,371 rows of `online_retail_II.xlsx`, drops 19,494 cancellations,
-and loads 1,047,877 rows; the validate → execute → chart path then returns real
-results on them. Caveat: that run used SQLite, so Postgres-specific behaviour is
-still unexercised — see docs/DEVELOPMENT_GUIDE.md for the recorded output.
+Verified by the opt-in integration suite against the real dataset **in Postgres
+16**: the loader reads all 1,067,371 rows of `online_retail_II.xlsx`, drops
+19,494 cancellations, and loads 1,047,877 rows; the validate → execute → chart
+path then returns real results on them. A SQLite run produced identical counts,
+so the cleaning is driver-independent. See docs/DEVELOPMENT_GUIDE.md for the
+recorded output.
 
 The NL → SQL step has been verified against a real model — not mocked. Running
-the integration suite with `LLM_PROVIDER=ollama` and `OLLAMA_MODEL=qwen3:4b`,
-all three tests pass; asked "total revenue by country", the model produced a
-correct aggregate query that passed validation and returned real rows. Note this
-is a single question against one small local model, which demonstrates the path
-works — it is not an accuracy measurement, and no such metric is claimed.
+the integration suite against Postgres with `LLM_PROVIDER=ollama` and
+`OLLAMA_MODEL=qwen3:4b`, all three tests pass; asked "total revenue by country",
+the model produced a correct aggregate query that passed validation and returned
+real rows. Note this is a single question against one small local model, which
+demonstrates the path works — it is not an accuracy measurement, and no such
+metric is claimed.
 
-Still unverified: Postgres specifically (the runs above used SQLite), and
-ChromaDB, which remains stubbed to the in-memory store.
+Still unverified: ChromaDB, which remains stubbed to the in-memory store, and
+every provider other than Ollama (the OpenAI path is wired but was never run).
 
 ## Docs
 - docs/ARCHITECTURE.md
