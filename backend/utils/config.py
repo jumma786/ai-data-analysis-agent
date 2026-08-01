@@ -32,6 +32,14 @@ class Settings(BaseSettings):
     query_timeout_seconds: int = 30
     max_result_rows: int = 5000
 
+    # RAG vector store. "memory" is the default on purpose: Chroma's default
+    # embedding function downloads an ONNX model on first use, which is a
+    # surprising side effect to trigger implicitly and would make the test suite
+    # depend on the network. Set "chroma" to opt into the persistent backend.
+    vector_store: str = "memory"          # "memory" | "chroma"
+    chroma_persist_dir: str = "./chroma_data"
+    chroma_collection: str = "documents"
+
     # Auth. `jwt_secret_key` MUST be set for any deployment where tokens need to
     # survive a restart or be validated by more than one process; when it is
     # empty the app falls back to a per-process random key and logs a warning.

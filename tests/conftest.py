@@ -16,3 +16,9 @@ def pytest_configure(config):
         "integration: requires a live database (and optionally an LLM key); "
         "skipped automatically when INTEGRATION_DATABASE_URL is unset",
     )
+    config.addinivalue_line(
+        "markers",
+        "chroma: exercises the ChromaDB backend; opt in with RUN_CHROMA_TESTS=1 "
+        "and run in a process that has not imported pandas (see "
+        "tests/test_rag_chroma.py for why)",
+    )

@@ -126,8 +126,24 @@ real rows. Note this is a single question against one small local model, which
 demonstrates the path works — it is not an accuracy measurement, and no such
 metric is claimed.
 
-Still unverified: ChromaDB, which remains stubbed to the in-memory store, and
-every provider other than Ollama (the OpenAI path is wired but was never run).
+**ChromaDB is wired** (`rag/pipeline.ChromaVectorStore`), behind
+`VECTOR_STORE=chroma`; the in-memory cosine store stays the default so a bare
+checkout and the test suite need no model download. Verified with Chroma's real
+all-MiniLM-L6-v2 embeddings: a question sharing no content words with its answer
+retrieved the right chunk, and the collection survived a reload from disk. The
+adapter itself has 11 unit tests that inject a stub embedding function to stay
+offline — those cover ids, upsert, and query plumbing, not embedding quality.
+
+Caveat worth reading before you enable it: on the Anaconda/Windows environment
+this was built on, importing pandas makes onnxruntime fail to load, which stops
+Chroma's default embeddings working *inside the backend process* (which imports
+pandas). The store itself is sound; the environment is not. Details and a check
+you can run in one line are in docs/DEVELOPMENT_GUIDE.md.
+
+Still unverified or missing: no API route ingests documents into the RAG store
+(it is callable only from Python, and the Streamlit "Document Search" page is a
+placeholder), and every LLM provider other than Ollama — the OpenAI path is
+wired but has never been run.
 
 ## Docs
 - docs/ARCHITECTURE.md

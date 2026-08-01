@@ -109,6 +109,74 @@ by `pytest tests/ -q` but always report as skipped there.
    times out. This is a hardware-dependent number, not a benchmark; measure your
    own rather than trusting these figures.
 
+## RAG vector store
+
+`rag/pipeline.py` ships two stores behind one `VectorStore` protocol
+(`add(chunks)` / `query(q, k)`):
+
+| Backend  | When to use | Persists? | Embeddings |
+|----------|-------------|-----------|------------|
+| `memory` | default; tests, bare checkout | no | bag-of-words cosine |
+| `chroma` | deployment | yes, to `CHROMA_PERSIST_DIR` | Chroma's all-MiniLM-L6-v2 |
+
+Enable Chroma with:
+
+```bash
+pip install chromadb
+export VECTOR_STORE=chroma
+export CHROMA_PERSIST_DIR=./chroma_data
+export CHROMA_COLLECTION=documents
+```
+
+`memory` is the default deliberately. Chroma's built-in embedding function
+downloads an ONNX model the first time it runs; making that happen implicitly
+would put a network dependency in the test suite.
+
+If `VECTOR_STORE=chroma` but the import fails, `build_store` logs a warning and
+degrades to the in-memory store rather than failing the upload.
+
+Verified by hand on 2026-08-01 with Chroma's real all-MiniLM-L6-v2 embeddings:
+asked "how long do I have to return an item for a refund?", it retrieved
+"Customers may send merchandise back for a full reimbursement within thirty days
+of delivery" — a chunk sharing no content words with the question, so this is
+genuine embedding similarity rather than keyword overlap. The collection also
+survived being reloaded from disk by a fresh client. First build took 9.3s
+including a 79 MB model download; queries after that took 0.2s.
+
+### Known environment conflict: pandas breaks onnxruntime
+
+On the machine this was developed on (Anaconda, Windows), importing pandas makes
+onnxruntime unimportable:
+
+```
+python -c "import onnxruntime"                 # fine
+python -c "import pandas; import onnxruntime"  # ImportError: DLL load failed
+```
+
+`KMP_DUPLICATE_LIB_OK=TRUE` does not help. Two consequences:
+
+1. **The Chroma unit tests are opt-in** (`RUN_CHROMA_TESTS=1`) and must run in a
+   process that has not imported pandas. Collected alongside pandas-importing
+   tests they do not merely fail — Chroma's Rust core takes an access violation
+   and kills the run.
+2. **`VECTOR_STORE=chroma` will not work inside the FastAPI backend on such a
+   machine**, because `backend/main.py` imports pandas long before any document
+   is ingested, so Chroma's default embedding function cannot load. It will
+   raise "onnxruntime python package is not installed" at ingest time, which is
+   misleading — onnxruntime *is* installed, it just cannot initialise. Either
+   fix the environment, or pass an embedding function that does not use
+   onnxruntime (`ChromaVectorStore(..., embedding_function=...)`).
+
+Check your own environment with the two commands above before enabling Chroma.
+
+Two design limitations to know about:
+- **The collection is shared, not per-user.** Everyone's documents land in the
+  same namespace. Scope `collection_name` per user before this holds anything
+  confidential.
+- **Chunk ids are content hashes**, so re-ingesting a document upserts instead
+  of duplicating — but nothing ever *deletes*, so a removed document's chunks
+  stay retrievable.
+
 ## Known TODOs (be honest in interviews)
 - **Authorization**: authentication is done (signup/login/JWT dependency, see
   `backend/api/auth.py`) and every non-public route is guarded, but there are no
@@ -118,8 +186,12 @@ by `pytest tests/ -q` but always report as skipped there.
   shared by all users. Key it per user before a second person uses an instance.
 - **`/connect-database` SSRF**: a logged-in user can point the server at any URL.
   Add a host allowlist. See "Known gaps" in API_DOCUMENTATION.md.
-- **ChromaDB**: production path is stubbed to the in-memory store; wire the
-  Chroma client in `rag/pipeline.build_store`.
+- **RAG document ingestion has no API route**: the Chroma backend works (see
+  "RAG vector store" above), but nothing calls `build_store` from the web layer
+  — no `/documents/upload` endpoint exists, and the Streamlit "Document Search"
+  page is still a placeholder. The pipeline is callable only from Python.
+- **RAG store is not per-user and never deletes**: one shared collection, and
+  removing a document leaves its chunks retrievable.
 - **Query timeout**: config value exists; enforce it via DB driver options
   (e.g. `options=-c statement_timeout=30000` for Postgres).
 - **MySQL / SQL Server**: introspection uses SQLAlchemy so it should work, but
