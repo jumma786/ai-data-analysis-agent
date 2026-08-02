@@ -4,6 +4,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 EXPOSE 8501
+# Default for docker-compose's internal network; override with the backend's
+# real URL when deploying each service separately (e.g. on Railway).
 ENV API_URL=http://backend:8000
-CMD ["streamlit", "run", "frontend/streamlit_app.py", \
-     "--server.address=0.0.0.0", "--server.port=8501"]
+# Shell form so ${PORT} expands -- see Dockerfile.backend for why.
+CMD streamlit run frontend/streamlit_app.py \
+    --server.address=0.0.0.0 --server.port=${PORT:-8501}
