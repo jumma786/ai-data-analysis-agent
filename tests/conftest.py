@@ -4,6 +4,22 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 
+def pytest_sessionstart(session):
+    """Lower bcrypt's cost factor for the test run.
+
+    Production uses passlib's default (12 rounds, ~250ms per hash by design).
+    The auth tests hash and verify often enough that this dominated the suite --
+    56s, most of it burning CPU on purpose. Four rounds keeps the algorithm and
+    every property under test (salting, verification, the 72-byte limit) while
+    removing the deliberate slowness. The cost factor itself is not what these
+    tests are checking.
+    """
+    from backend.utils import security
+
+    security._pwd_context = security.CryptContext(  # noqa: SLF001
+        schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=4)
+
+
 def pytest_configure(config):
     """Register the `integration` marker.
 

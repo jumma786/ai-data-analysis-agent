@@ -9,7 +9,8 @@ prose.
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![LangGraph](https://img.shields.io/badge/LangGraph-1C3C3C)
 ![Postgres](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-59%20passing-success)
+![Tests](https://img.shields.io/badge/tests-105%20passing-success)
+![Licence](https://img.shields.io/badge/licence-MIT-blue)
 
 ```
 "total revenue by country"
@@ -175,18 +176,25 @@ Full walkthrough with recorded output: [docs/DEVELOPMENT_GUIDE.md](docs/DEVELOPM
 |--------|------|---------|------|
 | `GET`  | `/health` | Liveness + active LLM provider | – |
 | `POST` | `/auth/signup` | Create an account | – |
-| `POST` | `/auth/login` | Email + password → JWT | – |
+| `POST` | `/auth/login` | Email + password → access + refresh tokens | – |
+| `POST` | `/auth/refresh` | Rotate a refresh token for a new pair | – |
+| `POST` | `/auth/logout` | Revoke a refresh token | – |
 | `GET`  | `/auth/me` | Identity of the current token | ✅ |
 | `POST` | `/upload` | Profile CSV/Excel/Parquet | ✅ |
-| `POST` | `/connect-database` | Introspect a SQL database | ✅ |
-| `GET`  | `/schema` | Return cached schema | ✅ |
+| `POST` | `/connect-database` | Introspect a SQL database (host-allowlisted) | ✅ |
+| `GET`  | `/schema` | Schema cached for *this* user | ✅ |
 | `POST` | `/query` | NL question → SQL + result + chart + insight | ✅ |
 | `POST` | `/chat` | Multi-turn, context-aware | ✅ |
-| `POST` | `/generate-report` | PDF report | ✅ |
+| `POST` | `/generate-report` | PDF report with embedded chart | ✅ |
+| `POST` | `/documents/upload` | Ingest TXT/PDF/DOCX into your RAG store | ✅ |
+| `POST` | `/documents/query` | Answer from your documents, with sources | ✅ |
+| `GET`  | `/documents/status` | Chunks stored + active backend | ✅ |
 
-Protected routes take `Authorization: Bearer <token>`. Tokens are HS256 JWTs
-carrying the user's email in `sub`. Full reference, including error codes and an
-explicit "Known gaps" section: [docs/API_DOCUMENTATION.md](docs/API_DOCUMENTATION.md).
+Protected routes take `Authorization: Bearer <access_token>`. Access tokens are
+short-lived and stateless; refresh tokens are tracked server-side by `jti`,
+**rotate on use**, and can be revoked. Full reference, including error codes and
+an explicit "Known gaps" section:
+[docs/API_DOCUMENTATION.md](docs/API_DOCUMENTATION.md).
 
 ---
 
@@ -204,20 +212,27 @@ All via environment or `.env` (see `backend/utils/config.py`).
 | `METADATA_DATABASE_URL` | `sqlite:///./app_metadata.db` | Users, datasets |
 | `JWT_SECRET_KEY` | – | **Required in deployment**; see below |
 | `JWT_ALGORITHM` / `ACCESS_TOKEN_EXPIRE_MINUTES` | `HS256` / `60` | |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | `14` | Refresh tokens are revocable |
+| `LOGIN_MAX_ATTEMPTS` / `LOGIN_WINDOW_SECONDS` | `5` / `300` | Failed logins, per (email, IP) |
+| `ALLOWED_DATABASE_HOSTS` | – | Comma-separated. **Empty permits any host** |
+| `QUERY_TIMEOUT_SECONDS` | `30` | Enforced as a driver-level statement timeout |
 | `VECTOR_STORE` | `memory` | `memory` \| `chroma` |
 | `CHROMA_PERSIST_DIR` / `CHROMA_COLLECTION` | `./chroma_data` / `documents` | |
 | `MAX_RESULT_ROWS` | `5000` | Appended as `LIMIT` when a query lacks one |
 
 > **`JWT_SECRET_KEY` matters.** Left empty, the app generates a random
 > per-process key and logs a warning: every token dies on restart, and a second
-> worker cannot verify tokens issued by the first.
+> worker cannot verify tokens issued by the first. Set shorter than 32 bytes and
+> it warns too — RFC 7518 §3.2, since a short HS256 key can be brute-forced
+> offline from one captured token. Generate one with:
+> `python -c "import secrets; print(secrets.token_urlsafe(48))"`
 
 ---
 
 ## Testing
 
 ```bash
-pytest tests/ -q                              # 59 passed, 14 skipped
+pytest tests/ -q                              # 105 passed, 14 skipped
 pytest tests/integration -m integration -q    # needs INTEGRATION_DATABASE_URL
 RUN_CHROMA_TESTS=1 pytest tests/test_rag_chroma.py -q   # 11 passed
 ```
@@ -236,7 +251,9 @@ What is actually proven, and by what. Claims are limited to what was executed.
 |---|---|---|
 | SQL safety validation | Unit tests | 10 tests: DDL/DML, stacked statements, comment-hidden keywords |
 | Dataset profiling, chart choice | Unit tests | Deterministic, no external services |
-| Auth: hashing, JWT, signup/login, route guards | Unit tests | 31 tests on in-memory SQLite |
+| Auth: hashing, JWT, signup/login, route guards, refresh rotation, revocation, throttling | Unit tests | 41 tests on in-memory SQLite; replayed refresh tokens 401, refresh tokens rejected as access credentials |
+| SSRF allowlist, statement timeouts, rate limiter | Unit tests | 24 tests, incl. cloud-metadata host blocked |
+| RAG routes + per-user isolation | Unit tests | 10 tests; one user's documents are invisible to another |
 | Loader cleaning rules | Unit tests | 10 tests on synthetic frames |
 | Loader against the real dataset | Executed | 1,067,371 rows read → 19,494 cancellations dropped → **1,047,877 loaded** into Postgres 16; SQLite run gave identical counts |
 | Query path on real rows | Integration suite | validate → execute → chart against the loaded table |
@@ -256,23 +273,28 @@ Stated plainly, because a portfolio project that hides these is less useful than
 one that doesn't.
 
 **Security**
-- **No authorization model.** Every authenticated user has identical access. No
-  roles, no per-user data scoping — `Dataset.owner_id` exists but nothing reads it.
-- **`/connect-database` is an SSRF primitive.** Authentication narrows *who* can
-  trigger it; any logged-in user can still make the server open a connection to
-  an arbitrary URL. Needs a host allowlist.
-- **No token revocation or refresh.** A leaked token is valid until it expires.
-- **No login rate limiting.** Credential stuffing is slowed only by bcrypt.
+- **No authorization model.** Authentication is complete; *authorization* is
+  not. Every authenticated user has identical rights — no roles, no permissions.
+  `Dataset.owner_id` exists and nothing reads it.
+- **The SSRF allowlist is coarse.** It matches the hostname as written without
+  resolving DNS, so a permitted name pointing at an internal address still
+  passes, and DNS rebinding is unaddressed. It is also empty by default.
+- **Access tokens cannot be revoked.** Only refresh tokens are tracked
+  server-side; a stolen access token works until it expires.
+- **Rate limiting is per-process.** Multiple workers multiply the effective
+  limit and a restart clears it. It raises the cost of guessing; it is not a
+  defence against a distributed attacker.
 
 **Correctness / scope**
-- **The schema cache is global.** `_SCHEMA_CACHE` is a single entry shared by all
-  users — whoever connects last sets the schema everyone queries against.
-- **RAG has no HTTP route.** `build_store` is callable only from Python; the
-  Streamlit "Document Search" page is a placeholder. The store is also shared
-  across users and never deletes.
+- **Per-user state is process-local.** The schema cache and in-memory document
+  stores are lost on restart and not shared between workers. Use
+  `VECTOR_STORE=chroma` for documents that must persist.
+- **RAG never deletes.** Re-ingesting upserts (chunk ids are content hashes),
+  but a removed document's chunks stay retrievable. There is no delete route.
+- **No statement timeout on SQLite.** It has no server-side equivalent, so those
+  queries are uncapped — a warning is logged rather than implying otherwise.
+  PostgreSQL and MySQL are capped.
 - **Only Ollama has been exercised.** The OpenAI provider is wired but unrun.
-- **Query timeout is not enforced.** The config value exists; the DB driver
-  option is not yet applied.
 
 **Environment**
 - On Anaconda/Windows, importing pandas makes `onnxruntime` fail to load, which
@@ -304,3 +326,7 @@ docs/            ARCHITECTURE, API_DOCUMENTATION, DEVELOPMENT_GUIDE
 - [Architecture](docs/ARCHITECTURE.md)
 - [API reference](docs/API_DOCUMENTATION.md) — includes explicit "Known gaps"
 - [Development guide](docs/DEVELOPMENT_GUIDE.md) — setup, demo path, recorded runs
+
+## Licence
+
+[MIT](LICENSE).

@@ -12,11 +12,12 @@ pipeline is testable without the heavy dependency.
 from __future__ import annotations
 from typing import TypedDict, Optional
 import pandas as pd
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 
 from backend.agents.sql_agent import generate_sql
 from backend.agents.sql_validation import validate_sql, enforce_limit
 from backend.agents.analysis_agents import choose_chart, generate_insight
+from backend.services.db import create_analytics_engine
 from backend.utils.config import get_settings
 from backend.utils.logging_config import logger
 
@@ -51,7 +52,8 @@ def node_validate(state: AgentState) -> AgentState:
 def node_execute(state: AgentState) -> AgentState:
     s = get_settings()
     sql = enforce_limit(state["sql"], s.max_result_rows)
-    engine = create_engine(s.database_url)
+    # Engine carries a driver-level statement timeout; see services/db.py.
+    engine = create_analytics_engine()
     with engine.connect() as conn:
         df = pd.read_sql(text(sql), conn)
     state["df"] = df

@@ -9,6 +9,8 @@ numpy>=1.24
 openpyxl>=3.1
 pyarrow>=14.0
 plotly>=5.18
+# Optional: enables chart images in PDF reports. Reports still build without it.
+kaleido>=0.2
 streamlit>=1.30
 langchain>=0.1
 langgraph>=0.0.40

@@ -33,7 +33,17 @@ def _sidebar_auth() -> None:
         if st.session_state.get("access_token"):
             st.caption(f"Signed in as {st.session_state.get('email', '?')}")
             if st.button("Sign out"):
+                # Revoke server-side too, otherwise the refresh token stays
+                # valid for weeks after the user thinks they have logged out.
+                token = st.session_state.get("refresh_token")
+                if token:
+                    try:
+                        requests.post(f"{API_URL}/auth/logout",
+                                      json={"refresh_token": token}, timeout=5)
+                    except requests.RequestException:
+                        pass          # Local sign-out should still proceed.
                 st.session_state.pop("access_token", None)
+                st.session_state.pop("refresh_token", None)
                 st.rerun()
             return
 
@@ -46,9 +56,13 @@ def _sidebar_auth() -> None:
             r = requests.post(f"{API_URL}/auth/login",
                               json={"email": email, "password": password})
             if r.ok:
-                st.session_state.access_token = r.json()["access_token"]
+                body = r.json()
+                st.session_state.access_token = body["access_token"]
+                st.session_state.refresh_token = body["refresh_token"]
                 st.session_state.email = email
                 st.rerun()
+            elif r.status_code == 429:
+                st.error("Too many failed attempts. Wait a moment and retry.")
             else:
                 st.error("Login failed. Check your email and password.")
 
@@ -123,7 +137,45 @@ elif page == "Chat With Data":
 
 elif page == "Document Search":
     st.subheader("RAG document Q&A")
-    st.info("Upload documents via the backend RAG pipeline, then query here.")
+    if not st.session_state.get("access_token"):
+        st.warning("Sign in from the sidebar to use document search.")
+    else:
+        status = requests.get(f"{API_URL}/documents/status",
+                              headers=auth_headers())
+        if status.ok:
+            info = status.json()
+            st.caption(f"{info['document_count']} chunk(s) stored "
+                       f"· backend: {info['backend']}")
+
+        doc = st.file_uploader("Add a document", type=["txt", "pdf", "docx"])
+        if doc and st.button("Ingest"):
+            r = requests.post(f"{API_URL}/documents/upload",
+                              files={"file": (doc.name, doc.getvalue())},
+                              headers=auth_headers())
+            if r.ok:
+                st.success(f"Ingested {r.json()['chunks_added']} chunk(s).")
+                st.rerun()
+            else:
+                st.error(r.text)
+
+        question = st.text_input("Ask a question about your documents")
+        if st.button("Search") and question:
+            r = requests.post(f"{API_URL}/documents/query",
+                              json={"question": question},
+                              headers=auth_headers())
+            if not r.ok:
+                st.error(r.text)
+            else:
+                data = r.json()
+                if not data["chunks"]:
+                    st.info("Nothing ingested yet — add a document above.")
+                else:
+                    st.write(data.get("answer") or "")
+                    # Sources are shown so the answer can be checked against
+                    # them rather than taken on trust.
+                    with st.expander(f"Sources ({len(data['chunks'])} chunks)"):
+                        for i, chunk in enumerate(data["chunks"], start=1):
+                            st.markdown(f"**{i}.** {chunk}")
 
 elif page == "Reports":
     st.subheader("Generate a PDF report")

@@ -178,26 +178,26 @@ Two design limitations to know about:
   stay retrievable.
 
 ## Known TODOs (be honest in interviews)
-- **Authorization**: authentication is done (signup/login/JWT dependency, see
-  `backend/api/auth.py`) and every non-public route is guarded, but there are no
-  roles, no per-user data scoping, no token revocation/refresh, and no login rate
-  limiting.
-- **Schema cache is global**: `_SCHEMA_CACHE` in `backend/main.py` is one entry
-  shared by all users. Key it per user before a second person uses an instance.
-- **`/connect-database` SSRF**: a logged-in user can point the server at any URL.
-  Add a host allowlist. See "Known gaps" in API_DOCUMENTATION.md.
-- **RAG document ingestion has no API route**: the Chroma backend works (see
-  "RAG vector store" above), but nothing calls `build_store` from the web layer
-  — no `/documents/upload` endpoint exists, and the Streamlit "Document Search"
-  page is still a placeholder. The pipeline is callable only from Python.
-- **RAG store is not per-user and never deletes**: one shared collection, and
-  removing a document leaves its chunks retrievable.
-- **Query timeout**: config value exists; enforce it via DB driver options
-  (e.g. `options=-c statement_timeout=30000` for Postgres).
+- **Authorization**: authentication is complete (signup/login/refresh/logout,
+  JWT dependency, rate limiting — `backend/api/auth.py`), but there is still no
+  *authorization* model: no roles, no permissions. `Dataset.owner_id` exists and
+  nothing reads it.
+- **SSRF allowlist is coarse**: `services/url_guard.py` matches the hostname as
+  written, without resolving DNS, so a permitted name that resolves internally
+  still passes. Empty by default.
+- **Access tokens cannot be revoked**: only refresh tokens are tracked. Keep
+  `ACCESS_TOKEN_EXPIRE_MINUTES` short.
+- **Rate limiting is in-process**: multiple workers multiply the limit; a
+  restart clears it. Move to Redis before relying on it.
+- **RAG deletes nothing**: chunks are content-addressed so re-ingest upserts,
+  but a removed document's chunks stay retrievable. There is no delete route.
+- **Per-user state is process-local**: the schema cache and in-memory document
+  stores are lost on restart and not shared between workers.
+- **No statement timeout on SQLite**: it has no server-side equivalent, so those
+  queries are uncapped (a warning is logged). Postgres and MySQL are capped.
 - **MySQL / SQL Server**: introspection uses SQLAlchemy so it should work, but
   is only tested against SQLite/Postgres-style URLs.
-- **Report charts**: current PDF embeds text + KPIs; embedding the Plotly figure
-  as an image (kaleido) is a follow-up.
+- **Only Ollama has been exercised**: the OpenAI provider is wired but unrun.
 
 ## Coding standards
 Type hints, docstrings, module-level logging, small pure functions for anything

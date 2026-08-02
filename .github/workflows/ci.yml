@@ -19,5 +19,7 @@ jobs:
             plotly pypdf python-docx reportlab pytest \
             fastapi httpx python-multipart email-validator \
             "passlib[bcrypt]" "bcrypt<4.1" PyJWT openpyxl
+      # kaleido and chromadb are deliberately absent: the suite must prove it
+      # degrades correctly when its optional dependencies are missing.
       - name: Run unit tests
         run: pytest tests/ -q

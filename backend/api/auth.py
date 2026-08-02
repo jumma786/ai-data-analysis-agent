@@ -1,32 +1,41 @@
-"""Authentication router: signup, login, and the JWT-bearer dependency.
+"""Authentication router: signup, login, refresh, logout, and the JWT dependency.
 
 Endpoints
-    POST /auth/signup  -> create a user (409 if the email already exists)
-    POST /auth/login   -> verify credentials, return a signed JWT
-    GET  /auth/me      -> echo the caller's identity (useful smoke test)
+    POST /auth/signup   -> create a user (409 if the email already exists)
+    POST /auth/login    -> verify credentials, return access + refresh tokens
+    POST /auth/refresh  -> exchange a refresh token for a new pair (rotating)
+    POST /auth/logout   -> revoke a refresh token
+    GET  /auth/me       -> echo the caller's identity (useful smoke test)
 
 Other routers protect themselves by declaring `Depends(get_current_user)`.
 
-Scope note: this covers authentication only. There is no role/permission model,
-no refresh-token rotation, and no server-side revocation -- a leaked token is
-valid until it expires. Those are the next things to add before this guards
-anything sensitive.
+Token model: access tokens are short-lived and stateless, so no database read is
+needed to authorise a request. Refresh tokens live for weeks, so those are
+tracked server-side by `jti` and can be revoked. Refreshing rotates the token --
+the presented one is revoked as the new one is issued -- which bounds the value
+of a stolen refresh token.
+
+Still missing, and documented rather than implied: there is no role or
+permission model. Every authenticated user has identical rights.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
-from backend.database.models import User
+from backend.database.models import RefreshToken, User
 from backend.database.session import get_db
 from backend.models.schemas import (
-    LoginRequest, SignupRequest, TokenResponse, UserResponse)
+    LoginRequest, RefreshRequest, SignupRequest, TokenResponse, UserResponse)
 from backend.utils.config import get_settings
 from backend.utils.logging_config import logger
+from backend.utils.rate_limit import SlidingWindowRateLimiter
 from backend.utils.security import (
-    TokenError, create_access_token, decode_access_token, hash_password,
-    verify_password)
+    TokenError, create_access_token, create_refresh_token, decode_access_token,
+    decode_refresh_token, hash_password, verify_password)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -40,10 +49,25 @@ _CREDENTIALS_ERROR = HTTPException(
     headers={"WWW-Authenticate": "Bearer"},
 )
 
+_settings = get_settings()
+login_limiter = SlidingWindowRateLimiter(
+    max_attempts=_settings.login_max_attempts,
+    window_seconds=_settings.login_window_seconds,
+)
+
 
 def normalize_email(email: str) -> str:
     """Lower-case and trim an email so lookups are case-insensitive."""
     return email.strip().lower()
+
+
+def rate_limit_key(email: str, client_host: str | None) -> str:
+    """Throttle per (account, source address).
+
+    Keying on the pair means one attacker cannot lock every account by
+    guessing, and a single account cannot be locked out from every location.
+    """
+    return f"{normalize_email(email)}|{client_host or 'unknown'}"
 
 
 def get_user_by_email(db: Session, email: str) -> User | None:
@@ -77,6 +101,24 @@ def authenticate_user(db: Session, email: str, password: str) -> User | None:
     return user
 
 
+def issue_token_pair(db: Session, user: User) -> TokenResponse:
+    """Mint an access + refresh pair and record the refresh token's jti."""
+    settings = get_settings()
+    access = create_access_token(subject=user.email)
+    refresh, jti, expires_at = create_refresh_token(subject=user.email)
+
+    # Stored naive-UTC to match the DateTime columns, which are not tz-aware.
+    db.add(RefreshToken(jti=jti, user_id=user.id,
+                        expires_at=expires_at.replace(tzinfo=None)))
+    db.commit()
+
+    return TokenResponse(
+        access_token=access,
+        refresh_token=refresh,
+        expires_in=settings.access_token_expire_minutes * 60,
+    )
+
+
 @router.post("/signup", response_model=UserResponse,
              status_code=status.HTTP_201_CREATED)
 def signup(req: SignupRequest, db: Session = Depends(get_db)) -> User:
@@ -90,17 +132,79 @@ def signup(req: SignupRequest, db: Session = Depends(get_db)) -> User:
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(req: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
-    """Exchange email + password for a bearer token."""
+def login(req: LoginRequest, request: Request,
+          db: Session = Depends(get_db)) -> TokenResponse:
+    """Exchange email + password for an access + refresh token pair."""
+    key = rate_limit_key(req.email, request.client.host if request.client else None)
+
+    if login_limiter.is_limited(key):
+        retry_after = login_limiter.retry_after(key)
+        logger.warning("Login rate limit hit.")
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Too many failed login attempts. Try again later.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
     user = authenticate_user(db, req.email, req.password)
     if user is None:
+        login_limiter.record_failure(key)
         logger.info("Failed login attempt.")
         raise _CREDENTIALS_ERROR
-    expire_minutes = get_settings().access_token_expire_minutes
-    return TokenResponse(
-        access_token=create_access_token(subject=user.email),
-        expires_in=expire_minutes * 60,
-    )
+
+    login_limiter.reset(key)
+    return issue_token_pair(db, user)
+
+
+@router.post("/refresh", response_model=TokenResponse)
+def refresh(req: RefreshRequest, db: Session = Depends(get_db)) -> TokenResponse:
+    """Exchange a valid refresh token for a new pair, revoking the old one.
+
+    Rotation means a stolen refresh token is useful only until the legitimate
+    client next refreshes, at which point the stolen copy is already revoked.
+    """
+    try:
+        claims = decode_refresh_token(req.refresh_token)
+    except TokenError as exc:
+        logger.info("Rejected refresh token: %s", exc)
+        raise _CREDENTIALS_ERROR from exc
+
+    record = db.query(RefreshToken).filter(
+        RefreshToken.jti == claims["jti"]).one_or_none()
+    if record is None or not record.is_active():
+        logger.info("Refresh token is unknown, revoked, or expired.")
+        raise _CREDENTIALS_ERROR
+
+    user = get_user_by_email(db, claims["sub"])
+    if user is None:
+        raise _CREDENTIALS_ERROR
+
+    record.revoked_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    db.commit()
+    return issue_token_pair(db, user)
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT,
+             response_class=Response)
+def logout(req: RefreshRequest, db: Session = Depends(get_db)) -> Response:
+    """Revoke a refresh token.
+
+    Returns 204 whether or not the token was valid, so this cannot be used to
+    probe which tokens exist. Any already-issued *access* token keeps working
+    until it expires -- the documented cost of stateless access tokens.
+    """
+    no_content = Response(status_code=status.HTTP_204_NO_CONTENT)
+    try:
+        claims = decode_refresh_token(req.refresh_token)
+    except TokenError:
+        return no_content
+
+    record = db.query(RefreshToken).filter(
+        RefreshToken.jti == claims["jti"]).one_or_none()
+    if record is not None and record.revoked_at is None:
+        record.revoked_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        db.commit()
+    return no_content
 
 
 def get_current_user(
@@ -110,7 +214,8 @@ def get_current_user(
     """Dependency that resolves a bearer token to a User, or raises 401.
 
     Re-reads the user on every request so a deleted account stops working
-    immediately, even while its token is still within its lifetime.
+    immediately, even while its token is still within its lifetime. Refresh
+    tokens presented here are rejected: they are not access credentials.
     """
     if credentials is None or not credentials.credentials:
         raise _CREDENTIALS_ERROR

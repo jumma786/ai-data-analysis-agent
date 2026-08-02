@@ -1,9 +1,7 @@
 """Centralized configuration via environment variables."""
 from functools import lru_cache
-try:
-    from pydantic_settings import BaseSettings
-except ImportError:  # pydantic v1 fallback
-    from pydantic import BaseSettings
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -29,8 +27,17 @@ class Settings(BaseSettings):
     # stay read-only. Defaults to a local SQLite file for zero-config demos.
     metadata_database_url: str = "sqlite:///./app_metadata.db"
 
+    # Enforced on the analytics connection via driver options -- see
+    # backend/services/db.py. A runaway aggregate should be killed by the
+    # database, not left to hold a worker open.
     query_timeout_seconds: int = 30
     max_result_rows: int = 5000
+
+    # Comma-separated hosts that /connect-database may dial. Empty means "allow
+    # anything", which is only safe for local development: without it, any
+    # authenticated user can point the server at internal infrastructure.
+    # Example: "localhost,127.0.0.1,db,analytics.internal"
+    allowed_database_hosts: str = ""
 
     # RAG vector store. "memory" is the default on purpose: Chroma's default
     # embedding function downloads an ONNX model on first use, which is a
@@ -47,8 +54,16 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
 
-    class Config:
-        env_file = ".env"
+    # Refresh tokens live far longer than access tokens, so unlike access
+    # tokens they are tracked server-side and can be revoked on logout.
+    refresh_token_expire_days: int = 14
+
+    # Login throttling. Counted per (email, client IP) so one attacker cannot
+    # lock every account, and one account cannot be locked from every IP.
+    login_max_attempts: int = 5
+    login_window_seconds: int = 300
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
 @lru_cache

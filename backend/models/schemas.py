@@ -59,5 +59,31 @@ class UserResponse(BaseModel):
 
 class TokenResponse(BaseModel):
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
-    expires_in: int          # seconds until expiry
+    expires_in: int          # seconds until the *access* token expires
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+# --- RAG documents --------------------------------------------------------
+
+class DocumentQueryRequest(BaseModel):
+    question: str
+    top_k: int = Field(default=4, ge=1, le=20)
+
+
+class DocumentQueryResponse(BaseModel):
+    question: str
+    answer: Optional[str] = None
+    chunks: list[str] = []
+    document_count: int = 0
+
+
+class DocumentIngestResponse(BaseModel):
+    filename: str
+    chunks_added: int
+    document_count: int
+    backend: str             # "memory" | "chroma"

@@ -16,15 +16,24 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from backend.api.auth import get_current_user, normalize_email
-from backend.database.models import Base, User
+from backend.api.auth import get_current_user, login_limiter, normalize_email
+from backend.database.models import Base, RefreshToken, User
 from backend.database.session import get_db
 from backend.main import app
+from backend.utils.config import get_settings
 from backend.utils.security import (
     MAX_PASSWORD_BYTES, TokenError, create_access_token, decode_access_token,
     hash_password, password_too_long, verify_password)
 
 VALID_PASSWORD = "correct horse battery"
+
+
+@pytest.fixture(autouse=True)
+def clean_rate_limiter():
+    """The login limiter is module-global; stop failures leaking between tests."""
+    login_limiter._hits.clear()   # noqa: SLF001 -- test-only reach-in
+    yield
+    login_limiter._hits.clear()   # noqa: SLF001
 
 
 @pytest.fixture()
@@ -183,6 +192,7 @@ def test_login_returns_usable_token(client):
     assert body["token_type"] == "bearer"
     assert body["expires_in"] > 0
     assert decode_access_token(body["access_token"])["sub"] == "analyst@example.com"
+    assert body["refresh_token"], "login should also return a refresh token"
 
 
 def test_login_rejects_wrong_password(client):
@@ -268,6 +278,93 @@ def test_protected_endpoint_rejects_invalid_token(client):
 
 def test_health_stays_public(client):
     assert client.get("/health").status_code == 200
+
+
+# --- refresh tokens, rotation and revocation ------------------------------
+
+def test_refresh_returns_a_new_pair(client):
+    _signup(client)
+    original = _login(client).json()
+    resp = client.post("/auth/refresh",
+                       json={"refresh_token": original["refresh_token"]})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["access_token"] != original["access_token"]
+
+
+def test_refresh_rotates_the_old_token_out(client):
+    """A refresh token is single-use: replaying it must fail."""
+    _signup(client)
+    original = _login(client).json()["refresh_token"]
+    assert client.post("/auth/refresh",
+                       json={"refresh_token": original}).status_code == 200
+    replay = client.post("/auth/refresh", json={"refresh_token": original})
+    assert replay.status_code == 401
+
+
+def test_refresh_rejects_an_access_token(client):
+    """Token type is enforced -- an access token is not a refresh token."""
+    _signup(client)
+    access = _login(client).json()["access_token"]
+    assert client.post("/auth/refresh",
+                       json={"refresh_token": access}).status_code == 401
+
+
+def test_access_endpoint_rejects_a_refresh_token(client):
+    """And the converse: a refresh token cannot authorise a request."""
+    _signup(client)
+    refresh_token = _login(client).json()["refresh_token"]
+    resp = client.post("/query", json={"question": "x"},
+                       headers={"Authorization": f"Bearer {refresh_token}"})
+    assert resp.status_code == 401
+
+
+def test_refresh_rejects_garbage(client):
+    assert client.post("/auth/refresh",
+                       json={"refresh_token": "not.a.jwt"}).status_code == 401
+
+
+def test_logout_revokes_the_refresh_token(client):
+    _signup(client)
+    refresh_token = _login(client).json()["refresh_token"]
+    assert client.post("/auth/logout",
+                       json={"refresh_token": refresh_token}).status_code == 204
+    assert client.post("/auth/refresh",
+                       json={"refresh_token": refresh_token}).status_code == 401
+
+
+def test_logout_is_silent_about_unknown_tokens(client):
+    """204 either way, so logout cannot be used to probe which tokens exist."""
+    assert client.post("/auth/logout",
+                       json={"refresh_token": "not.a.jwt"}).status_code == 204
+
+
+def test_refresh_token_is_stored_by_jti_not_verbatim(client, db_session):
+    """The token is a credential; only its identifier belongs in the database."""
+    _signup(client)
+    refresh_token = _login(client).json()["refresh_token"]
+    record = db_session.query(RefreshToken).one()
+    assert record.jti not in (refresh_token, "")
+    assert refresh_token not in (record.jti or "")
+
+
+# --- login rate limiting --------------------------------------------------
+
+def test_repeated_failures_are_throttled(client):
+    _signup(client)
+    for _ in range(get_settings().login_max_attempts):
+        assert _login(client, password="wrong password").status_code == 401
+    limited = _login(client, password="wrong password")
+    assert limited.status_code == 429
+    assert "Retry-After" in limited.headers
+
+
+def test_successful_login_clears_the_failure_count(client):
+    _signup(client)
+    _login(client, password="wrong password")
+    assert _login(client).status_code == 200
+    # The earlier failure was reset, so a fresh run of failures is allowed.
+    for _ in range(get_settings().login_max_attempts - 1):
+        assert _login(client, password="wrong password").status_code == 401
 
 
 # --- helpers --------------------------------------------------------------
