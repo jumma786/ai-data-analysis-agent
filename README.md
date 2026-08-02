@@ -29,6 +29,11 @@ That SQL is verbatim output from a local `qwen3:4b` against the real UCI Online
 Retail II dataset (1,047,877 rows in Postgres 16) — not a mock, not an
 illustration. See [Verification](#verification).
 
+![Chat With Data — question, grounded insight, generated SQL and live results](docs/images/chat-with-data.jpg)
+
+*Unretouched screenshot: `qwen3:4b` answering "top 5 countries by revenue" against
+the loaded dataset. The figures match a hand-written reference query exactly.*
+
 ---
 
 ## Contents
@@ -189,6 +194,15 @@ Full walkthrough with recorded output: [docs/DEVELOPMENT_GUIDE.md](docs/DEVELOPM
 | `POST` | `/documents/upload` | Ingest TXT/PDF/DOCX into your RAG store | ✅ |
 | `POST` | `/documents/query` | Answer from your documents, with sources | ✅ |
 | `GET`  | `/documents/status` | Chunks stored + active backend | ✅ |
+
+### Document Q&A
+
+![Document Search — answer with the retrieved source chunk expanded](docs/images/document-search.jpg)
+
+*Answers cite their sources. Asked "how long do I have to get my money back?" —
+wording that appears nowhere in the document — it retrieved the relevant chunk
+and answered from it. The expander shows exactly what the answer was built from,
+so it can be checked rather than trusted.*
 
 Protected routes take `Authorization: Bearer <access_token>`. Access tokens are
 short-lived and stateless; refresh tokens are tracked server-side by `jti`,

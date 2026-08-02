@@ -21,6 +21,16 @@ def auth_headers() -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"} if token else {}
 
 
+def escape_markdown(text: str) -> str:
+    """Neutralise Markdown/LaTeX metacharacters in model-generated text.
+
+    Streamlit treats `$...$` as LaTeX, so an insight mentioning two currency
+    amounts renders the text between them as a mangled equation. Model output is
+    prose, not markup, so escape the delimiters rather than trusting it.
+    """
+    return (text or "").replace("\\", "\\\\").replace("$", r"\$")
+
+
 def _sidebar_auth() -> None:
     """Minimal signup/login form.
 
@@ -114,7 +124,7 @@ elif page == "Chat With Data":
     if "messages" not in st.session_state:
         st.session_state.messages = []
     for m in st.session_state.messages:
-        st.chat_message(m["role"]).write(m["content"])
+        st.chat_message(m["role"]).write(escape_markdown(m["content"]))
     q = st.chat_input("e.g. Show monthly revenue trend")
     if q:
         st.session_state.messages.append({"role": "user", "content": q})
@@ -126,7 +136,8 @@ elif page == "Chat With Data":
             if not data["valid"]:
                 st.chat_message("assistant").error(data.get("error"))
             else:
-                st.chat_message("assistant").write(data.get("insight", ""))
+                st.chat_message("assistant").write(
+                    escape_markdown(data.get("insight", "")))
                 st.code(data.get("sql", ""), language="sql")
                 if data.get("rows"):
                     st.dataframe(pd.DataFrame(data["rows"]))
@@ -170,12 +181,12 @@ elif page == "Document Search":
                 if not data["chunks"]:
                     st.info("Nothing ingested yet — add a document above.")
                 else:
-                    st.write(data.get("answer") or "")
+                    st.write(escape_markdown(data.get("answer") or ""))
                     # Sources are shown so the answer can be checked against
                     # them rather than taken on trust.
                     with st.expander(f"Sources ({len(data['chunks'])} chunks)"):
                         for i, chunk in enumerate(data["chunks"], start=1):
-                            st.markdown(f"**{i}.** {chunk}")
+                            st.markdown(f"**{i}.** {escape_markdown(chunk)}")
 
 elif page == "Reports":
     st.subheader("Generate a PDF report")
