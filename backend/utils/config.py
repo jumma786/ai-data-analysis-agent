@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     login_max_attempts: int = 5
     login_window_seconds: int = 300
 
+    # When set, rate limiting is backed by Redis instead of an in-process dict,
+    # so the limit holds across multiple workers. See utils/rate_limit.py.
+    redis_url: str = ""
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

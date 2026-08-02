@@ -87,3 +87,9 @@ class DocumentIngestResponse(BaseModel):
     chunks_added: int
     document_count: int
     backend: str             # "memory" | "chroma"
+
+
+# --- Reports ----------------------------------------------------------------
+
+class ReportGenerateResponse(BaseModel):
+    report_id: int

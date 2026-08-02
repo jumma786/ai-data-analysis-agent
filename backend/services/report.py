@@ -8,6 +8,7 @@ report without a picture is far better than no report.
 from __future__ import annotations
 
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -41,13 +42,20 @@ def render_chart_png(df: Any, chart: str, out_path: str | Path,
 
 
 def build_report(question: str, state: dict) -> str:
-    """Render a PDF report using reportlab. Returns the file path."""
+    """Render a PDF report using reportlab. Returns the file path.
+
+    Each call gets a unique filename. A fixed name here would mean concurrent
+    requests from different users race on the same file on disk, and whoever's
+    report is downloaded next -- once a download route exists -- may not be the
+    same user who generated it.
+    """
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import cm
     from reportlab.pdfgen import canvas
 
     df = state.get("df")
-    out = Path(tempfile.gettempdir()) / "report.pdf"
+    report_id = uuid.uuid4().hex
+    out = Path(tempfile.gettempdir()) / f"report-{report_id}.pdf"
     c = canvas.Canvas(str(out), pagesize=A4)
     w, h = A4
     y = h - 3 * cm
@@ -65,7 +73,7 @@ def build_report(question: str, state: dict) -> str:
         y -= 0.8 * cm
 
     # Chart, if one can be produced.
-    chart_path = Path(tempfile.gettempdir()) / "report_chart.png"
+    chart_path = Path(tempfile.gettempdir()) / f"report-chart-{report_id}.png"
     if render_chart_png(df, state.get("chart", ""), chart_path):
         img_h = 8 * cm
         y -= img_h + 0.3 * cm

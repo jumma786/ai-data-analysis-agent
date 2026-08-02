@@ -9,7 +9,7 @@ prose.
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![LangGraph](https://img.shields.io/badge/LangGraph-1C3C3C)
 ![Postgres](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-105%20passing-success)
+![Tests](https://img.shields.io/badge/tests-133%20passing-success)
 ![Licence](https://img.shields.io/badge/licence-MIT-blue)
 
 ```
@@ -228,7 +228,8 @@ All via environment or `.env` (see `backend/utils/config.py`).
 | `JWT_ALGORITHM` / `ACCESS_TOKEN_EXPIRE_MINUTES` | `HS256` / `60` | |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | `14` | Refresh tokens are revocable |
 | `LOGIN_MAX_ATTEMPTS` / `LOGIN_WINDOW_SECONDS` | `5` / `300` | Failed logins, per (email, IP) |
-| `ALLOWED_DATABASE_HOSTS` | – | Comma-separated. **Empty permits any host** |
+| `REDIS_URL` | – | Rate limiting backend. **Empty uses an in-process limiter** — fine for one worker, meaningless across several |
+| `ALLOWED_DATABASE_HOSTS` | – | Comma-separated. **Empty permits any host** except known cloud-metadata addresses, which are always blocked |
 | `QUERY_TIMEOUT_SECONDS` | `30` | Enforced as a driver-level statement timeout |
 | `VECTOR_STORE` | `memory` | `memory` \| `chroma` |
 | `CHROMA_PERSIST_DIR` / `CHROMA_COLLECTION` | `./chroma_data` / `documents` | |
@@ -246,7 +247,7 @@ All via environment or `.env` (see `backend/utils/config.py`).
 ## Testing
 
 ```bash
-pytest tests/ -q                              # 105 passed, 14 skipped
+pytest tests/ -q                              # 133 passed, 14 skipped
 pytest tests/integration -m integration -q    # needs INTEGRATION_DATABASE_URL
 RUN_CHROMA_TESTS=1 pytest tests/test_rag_chroma.py -q   # 11 passed
 ```
@@ -290,14 +291,20 @@ one that doesn't.
 - **No authorization model.** Authentication is complete; *authorization* is
   not. Every authenticated user has identical rights — no roles, no permissions.
   `Dataset.owner_id` exists and nothing reads it.
-- **The SSRF allowlist is coarse.** It matches the hostname as written without
-  resolving DNS, so a permitted name pointing at an internal address still
-  passes, and DNS rebinding is unaddressed. It is also empty by default.
+- **The SSRF allowlist is coarse.** It matches the hostname as written, then
+  resolves DNS and rejects known cloud-metadata addresses (169.254.169.254 and
+  similar) even for an allowlisted name — but it does not extend that check to
+  ordinary private ranges, since self-hosted "internal" databases legitimately
+  live there. Resolution happens at check time, not at the DBAPI driver's
+  actual connect, so DNS rebinding in that (small) window is still
+  unaddressed. The allowlist itself is also empty by default.
 - **Access tokens cannot be revoked.** Only refresh tokens are tracked
   server-side; a stolen access token works until it expires.
-- **Rate limiting is per-process.** Multiple workers multiply the effective
-  limit and a restart clears it. It raises the cost of guessing; it is not a
-  defence against a distributed attacker.
+- **Rate limiting is per-process unless `REDIS_URL` is set.** Without it,
+  multiple workers multiply the effective limit and a restart clears it. With
+  it, limits are shared and survive a restart — but it still raises the cost
+  of guessing rather than defending against a distributed attacker across many
+  source IPs.
 
 **Correctness / scope**
 - **Per-user state is process-local.** The schema cache and in-memory document

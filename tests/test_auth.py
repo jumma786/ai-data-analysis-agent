@@ -31,9 +31,9 @@ VALID_PASSWORD = "correct horse battery"
 @pytest.fixture(autouse=True)
 def clean_rate_limiter():
     """The login limiter is module-global; stop failures leaking between tests."""
-    login_limiter._hits.clear()   # noqa: SLF001 -- test-only reach-in
+    login_limiter.clear_all()
     yield
-    login_limiter._hits.clear()   # noqa: SLF001
+    login_limiter.clear_all()
 
 
 @pytest.fixture()

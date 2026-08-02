@@ -194,7 +194,17 @@ elif page == "Reports":
     if st.button("Generate") and q:
         r = requests.post(f"{API_URL}/generate-report", json={"question": q},
                           headers=auth_headers())
-        st.json(r.json()) if r.ok else st.error(r.text)
+        if r.ok:
+            report_id = r.json()["report_id"]
+            dl = requests.get(f"{API_URL}/reports/{report_id}/download",
+                              headers=auth_headers())
+            if dl.ok:
+                st.download_button("Download report PDF", data=dl.content,
+                                   file_name="report.pdf", mime="application/pdf")
+            else:
+                st.error(dl.text)
+        else:
+            st.error(r.text)
 
 elif page == "Settings":
     st.subheader("Settings")

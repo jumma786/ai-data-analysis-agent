@@ -9,13 +9,16 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import Depends, FastAPI, UploadFile, File, HTTPException
+from fastapi.responses import FileResponse
+from sqlalchemy.orm import Session
 
 from backend.api.auth import get_current_user, router as auth_router
 from backend.api.documents import router as documents_router
-from backend.database.models import User
-from backend.database.session import init_db
+from backend.database.models import Report, User
+from backend.database.session import get_db, init_db
 from backend.models.schemas import (
-    QueryRequest, QueryResponse, DBConnectRequest, ChatRequest)
+    QueryRequest, QueryResponse, DBConnectRequest, ChatRequest,
+    ReportGenerateResponse)
 from backend.agents.graph import run_pipeline
 from backend.services.profiling import load_dataframe, profile_dataset, clean_dataset
 from backend.services.schema_introspect import introspect_schema
@@ -128,9 +131,10 @@ def chat(req: ChatRequest,
                                    history=history), current_user.id)
 
 
-@app.post("/generate-report")
+@app.post("/generate-report", response_model=ReportGenerateResponse)
 def generate_report(req: QueryRequest,
-                    current_user: User = Depends(get_current_user)) -> dict:
+                    current_user: User = Depends(get_current_user),
+                    db: Session = Depends(get_db)) -> ReportGenerateResponse:
     # Delegates to the report service (PDF). See backend/services/report.py.
     from backend.services.report import build_report
     state = run_pipeline(req.question, schema=req.schema_text or
@@ -138,4 +142,29 @@ def generate_report(req: QueryRequest,
     if not state.get("valid"):
         raise HTTPException(400, state.get("error", "Invalid query"))
     path = build_report(req.question, state)
-    return {"report_path": path}
+
+    # Persisted so /reports/{id}/download can check ownership. The path itself
+    # is a server-local filesystem detail and is never returned to the client.
+    report = Report(user_id=current_user.id, path=path)
+    db.add(report)
+    db.commit()
+    db.refresh(report)
+    return ReportGenerateResponse(report_id=report.id)
+
+
+@app.get("/reports/{report_id}/download")
+def download_report(report_id: int,
+                    current_user: User = Depends(get_current_user),
+                    db: Session = Depends(get_db)) -> FileResponse:
+    """Serve a previously generated report -- only to the user who generated it.
+
+    404 (not 403) for both "doesn't exist" and "belongs to someone else", so a
+    caller cannot use the response to enumerate other users' report ids.
+    """
+    report = db.query(Report).filter(Report.id == report_id).one_or_none()
+    if report is None or report.user_id != current_user.id:
+        raise HTTPException(404, "Report not found.")
+    if not Path(report.path).exists():
+        raise HTTPException(410, "Report file is no longer available.")
+    return FileResponse(report.path, media_type="application/pdf",
+                        filename="report.pdf")

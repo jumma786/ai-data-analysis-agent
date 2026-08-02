@@ -17,6 +17,9 @@ langgraph>=0.0.40
 openai>=1.10
 requests>=2.31
 chromadb>=0.4
+# Rate limiting backend when REDIS_URL is set; falls back to an in-process
+# limiter if unset. See backend/utils/rate_limit.py.
+redis>=5.0
 pypdf>=4.0
 python-docx>=1.1
 reportlab>=4.0
@@ -29,3 +32,6 @@ PyJWT>=2.8
 email-validator>=2.0
 pytest>=7.4
 httpx>=0.26
+# Test-only: an in-memory Redis stand-in so the Redis-backed rate limiter can
+# be unit-tested without a live server, same spirit as the Chroma stub embedder.
+fakeredis>=2.20

@@ -32,7 +32,7 @@ from backend.models.schemas import (
     LoginRequest, RefreshRequest, SignupRequest, TokenResponse, UserResponse)
 from backend.utils.config import get_settings
 from backend.utils.logging_config import logger
-from backend.utils.rate_limit import SlidingWindowRateLimiter
+from backend.utils.rate_limit import get_rate_limiter
 from backend.utils.security import (
     TokenError, create_access_token, create_refresh_token, decode_access_token,
     decode_refresh_token, hash_password, verify_password)
@@ -50,9 +50,10 @@ _CREDENTIALS_ERROR = HTTPException(
 )
 
 _settings = get_settings()
-login_limiter = SlidingWindowRateLimiter(
+login_limiter = get_rate_limiter(
     max_attempts=_settings.login_max_attempts,
     window_seconds=_settings.login_window_seconds,
+    prefix="login",
 )
 
 
