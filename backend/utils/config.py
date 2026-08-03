@@ -6,6 +6,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_name: str = "AI Data Analysis Agent"
+
+    # "development" | "production". Several defaults below are chosen for
+    # zero-config local demos and lose data when deployed; setting this to
+    # "production" turns those from silent traps into a refusal to boot.
+    # See assert_deployment_safe().
+    environment: str = "development"
+
     llm_provider: str = "openai"          # "openai" | "ollama"
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
@@ -73,3 +80,42 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> "Settings":
     return Settings()
+
+
+class UnsafeDeploymentConfig(RuntimeError):
+    """Raised at startup when configuration would silently lose data."""
+
+
+def deployment_problems(settings: Settings) -> list[str]:
+    """Return configuration problems that only matter in a real deployment.
+
+    Split out from the raising wrapper so the checks stay individually
+    testable, and so adding one is a single list entry.
+    """
+    problems: list[str] = []
+    if settings.metadata_database_url.startswith("sqlite"):
+        problems.append(
+            "METADATA_DATABASE_URL is SQLite "
+            f"({settings.metadata_database_url!r}), which is a file inside the "
+            "container. Container filesystems do not survive a redeploy, so "
+            "every deploy would silently discard all users, datasets, "
+            "conversations and reports. Point it at Postgres."
+        )
+    return problems
+
+
+def assert_deployment_safe(settings: Settings | None = None) -> None:
+    """Refuse to start when ENVIRONMENT=production and a demo default is live.
+
+    These defaults fail silently -- the app boots, serves traffic normally, and
+    loses the data later -- so a warning in the log is too weak. Only checked
+    under ENVIRONMENT=production so local development keeps working unchanged.
+    """
+    s = settings if settings is not None else get_settings()
+    if s.environment.lower() != "production":
+        return
+    problems = deployment_problems(s)
+    if problems:
+        raise UnsafeDeploymentConfig(
+            "Refusing to start with ENVIRONMENT=production:\n- "
+            + "\n- ".join(problems))

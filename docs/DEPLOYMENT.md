@@ -90,6 +90,7 @@ Set on the **backend** service:
 
 | Variable | Value | Notes |
 |---|---|---|
+| `ENVIRONMENT` | `production` | Enables the startup guard — set this first |
 | `JWT_SECRET_KEY` | 64-byte random string | `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
 | `METADATA_DATABASE_URL` | Postgres URL, read-write | **Do not leave as default** — see below |
 | `DATABASE_URL` | Postgres URL, read-only role | The analytics database |
@@ -117,6 +118,9 @@ Three defaults are chosen for zero-config local demos and are actively wrong in
 a deployment. All three fail *silently* — the app starts, serves traffic, and
 loses data later.
 
+**Set `ENVIRONMENT=production` and the first one becomes a startup failure
+instead of a silent one.** The other two are still on you.
+
 ### Metadata storage is ephemeral by default
 
 `metadata_database_url` defaults to `sqlite:///./app_metadata.db`, a file inside
@@ -126,6 +130,12 @@ behaves perfectly right up until the first redeploy.
 
 Point `METADATA_DATABASE_URL` at Postgres. This is the single most important
 variable on the list.
+
+With `ENVIRONMENT=production` the app refuses to boot rather than accepting
+this, raising `UnsafeDeploymentConfig` before any table is created — so the
+failure arrives in your deploy logs instead of arriving as missing users a week
+later. The check lives in `assert_deployment_safe()`
+(`backend/utils/config.py`) and runs from the FastAPI lifespan.
 
 ### `/connect-database` will dial anything
 

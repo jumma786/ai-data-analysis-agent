@@ -23,13 +23,16 @@ from backend.agents.graph import run_pipeline
 from backend.services.profiling import load_dataframe, profile_dataset, clean_dataset
 from backend.services.schema_introspect import introspect_schema
 from backend.services.url_guard import DatabaseHostNotAllowed, assert_host_allowed
-from backend.utils.config import get_settings
+from backend.utils.config import assert_deployment_safe, get_settings
 from backend.utils.logging_config import logger
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Ensure metadata tables exist so /auth/signup works on a fresh checkout."""
+    # Before init_db(), so a production misconfiguration is rejected rather than
+    # having tables created in storage that the next redeploy will discard.
+    assert_deployment_safe()
     init_db()
     yield
 

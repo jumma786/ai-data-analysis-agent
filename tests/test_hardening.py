@@ -341,3 +341,48 @@ def test_long_jwt_secret_passes_without_warning(monkeypatch, caplog):
     with caplog.at_level("WARNING"):
         assert security._get_secret() == strong       # noqa: SLF001
     assert not any("JWT_SECRET_KEY is only" in r.message for r in caplog.records)
+
+
+# --- production startup guard ---------------------------------------------
+#
+# The SQLite metadata default is correct for a zero-config local demo and
+# silently destructive when deployed: the app boots, works, and discards every
+# user on the next redeploy. These pin the boundary between those two cases.
+
+_PG = "postgresql+psycopg2://u:p@h:5432/app_metadata"
+
+
+def test_production_with_sqlite_metadata_refuses_to_start():
+    from backend.utils.config import UnsafeDeploymentConfig, assert_deployment_safe
+
+    s = _settings_with(environment="production",
+                       metadata_database_url="sqlite:///./app_metadata.db")
+    with pytest.raises(UnsafeDeploymentConfig) as excinfo:
+        assert_deployment_safe(s)
+    # The message has to name the variable to fix, not just complain.
+    assert "METADATA_DATABASE_URL" in str(excinfo.value)
+
+
+def test_production_with_postgres_metadata_starts():
+    from backend.utils.config import assert_deployment_safe
+
+    assert_deployment_safe(_settings_with(environment="production",
+                                          metadata_database_url=_PG))
+
+
+def test_development_with_sqlite_metadata_still_starts():
+    """The zero-config local path must keep working -- that is the whole point
+    of gating the check on ENVIRONMENT rather than on JWT_SECRET_KEY."""
+    from backend.utils.config import assert_deployment_safe
+
+    assert_deployment_safe(_settings_with(environment="development",
+                                          metadata_database_url="sqlite:///./app_metadata.db"))
+
+
+def test_environment_value_is_matched_case_insensitively():
+    from backend.utils.config import UnsafeDeploymentConfig, assert_deployment_safe
+
+    s = _settings_with(environment="Production",
+                       metadata_database_url="sqlite:///./app_metadata.db")
+    with pytest.raises(UnsafeDeploymentConfig):
+        assert_deployment_safe(s)
