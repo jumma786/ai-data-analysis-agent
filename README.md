@@ -9,7 +9,7 @@ prose.
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![LangGraph](https://img.shields.io/badge/LangGraph-1C3C3C)
 ![Postgres](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-133%20passing-success)
+![Tests](https://img.shields.io/badge/tests-129%20passing-success)
 ![Licence](https://img.shields.io/badge/licence-MIT-blue)
 
 ```
@@ -44,6 +44,7 @@ the loaded dataset. The figures match a hand-written reference query exactly.*
 - [Demo with real data](#demo-with-real-data)
 - [API](#api)
 - [Configuration](#configuration)
+- [Deployment](#deployment)
 - [Testing](#testing)
 - [Verification](#verification)
 - [Known limitations](#known-limitations)
@@ -218,6 +219,7 @@ All via environment or `.env` (see `backend/utils/config.py`).
 
 | Variable | Default | Notes |
 |----------|---------|-------|
+| `ENVIRONMENT` | `development` | `production` turns demo-only defaults into a refusal to start — see [Deployment](#deployment) |
 | `LLM_PROVIDER` | `openai` | `openai` \| `ollama` |
 | `OPENAI_API_KEY` / `OPENAI_MODEL` | – / `gpt-4o-mini` | |
 | `OLLAMA_BASE_URL` / `OLLAMA_MODEL` | `localhost:11434` / `llama3` | |
@@ -244,17 +246,46 @@ All via environment or `.env` (see `backend/utils/config.py`).
 
 ---
 
+## Deployment
+
+`docker-compose.yml` is for local development only — it hardcodes the Postgres
+password and reaches the backend at a compose-internal hostname. For a real
+host, both images already read `$PORT`, and `railway.backend.json` /
+`railway.frontend.json` describe the two services.
+
+Full guide, including the read-only `GRANT` block and the full environment
+table: **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
+
+**Set `ENVIRONMENT=production`.** Three defaults are chosen for zero-config
+local demos and are wrong once deployed — and all three fail *silently*, since
+the app boots and serves traffic normally before losing anything:
+
+| Default | What happens deployed |
+|---|---|
+| `METADATA_DATABASE_URL` is SQLite | A file on an ephemeral filesystem: **every redeploy discards all users, datasets and reports** |
+| `ALLOWED_DATABASE_HOSTS` is empty | Any authenticated user can point `/connect-database` at internal infrastructure |
+| `VECTOR_STORE=memory` | Uploaded RAG documents are lost on restart |
+
+`ENVIRONMENT=production` converts the first into a startup failure —
+`assert_deployment_safe()` raises before `init_db()` creates tables in storage
+that is about to vanish, so the problem surfaces in deploy logs rather than as
+missing users a week later. The other two remain your responsibility.
+
+---
+
 ## Testing
 
 ```bash
-pytest tests/ -q                              # 133 passed, 14 skipped
+pytest tests/ -q                              # 129 passed, 12 skipped in CI
 pytest tests/integration -m integration -q    # needs INTEGRATION_DATABASE_URL
 RUN_CHROMA_TESTS=1 pytest tests/test_rag_chroma.py -q   # 11 passed
 ```
 
-The default run needs **no database, no network and no API key**. The 14 skips
-are the 3 integration tests and 11 Chroma tests, which announce their skip
-reasons rather than passing vacuously.
+The default run needs **no database, no network and no API key**. Counts are
+quoted from CI, where `chromadb` and `kaleido` are deliberately left
+uninstalled to prove the suite degrades correctly without its optional
+dependencies; a local environment with more of them installed passes more and
+skips fewer. Skipped tests announce their reasons rather than passing vacuously.
 
 ---
 
@@ -274,6 +305,7 @@ What is actually proven, and by what. Claims are limited to what was executed.
 | Query path on real rows | Integration suite | validate → execute → chart against the loaded table |
 | **NL → SQL** | Integration suite, live model | `qwen3:4b` produced a correct aggregate that passed validation and returned rows. **Not mocked.** |
 | Chroma vector store | 11 unit tests + manual check | Adapter tests use a stub embedder; real all-MiniLM-L6-v2 retrieval confirmed separately |
+| Production startup guard | Unit tests | 4 tests: SQLite metadata under `ENVIRONMENT=production` refuses to boot; the zero-config local path is unaffected |
 
 **Deliberately not claimed.** The NL → SQL result is one question against one
 small local model. It demonstrates the path works end to end; it is **not** an
@@ -337,7 +369,7 @@ rag/             chunking, in-memory + Chroma vector stores, retrieval
 frontend/        Streamlit client
 scripts/         load_online_retail.py — UCI dataset loader
 tests/           unit suite; tests/integration/ is opt-in
-docs/            ARCHITECTURE, API_DOCUMENTATION, DEVELOPMENT_GUIDE
+docs/            ARCHITECTURE, API_DOCUMENTATION, DEVELOPMENT_GUIDE, DEPLOYMENT
 ```
 
 ---
@@ -347,6 +379,7 @@ docs/            ARCHITECTURE, API_DOCUMENTATION, DEVELOPMENT_GUIDE
 - [Architecture](docs/ARCHITECTURE.md)
 - [API reference](docs/API_DOCUMENTATION.md) — includes explicit "Known gaps"
 - [Development guide](docs/DEVELOPMENT_GUIDE.md) — setup, demo path, recorded runs
+- [Deployment](docs/DEPLOYMENT.md) — container hosts, least-privilege database roles, the traps that fail silently
 
 ## Licence
 
