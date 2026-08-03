@@ -320,9 +320,11 @@ Stated plainly, because a portfolio project that hides these is less useful than
 one that doesn't.
 
 **Security**
-- **No authorization model.** Authentication is complete; *authorization* is
-  not. Every authenticated user has identical rights — no roles, no permissions.
-  `Dataset.owner_id` exists and nothing reads it.
+- **No roles or permissions.** Every persisted resource is owner-scoped —
+  reports check ownership before serving, documents are partitioned by user id
+  — but all authenticated users have identical rights. There is no admin, no
+  sharing, and no role hierarchy. Single-tenant by design; adding a second
+  tenant would need a real permission layer.
 - **The SSRF allowlist is coarse.** It matches the hostname as written, then
   resolves DNS and rejects known cloud-metadata addresses (169.254.169.254 and
   similar) even for an allowlisted name — but it does not extend that check to
