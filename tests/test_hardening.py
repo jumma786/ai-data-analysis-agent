@@ -367,7 +367,8 @@ def test_production_with_postgres_metadata_starts():
     from backend.utils.config import assert_deployment_safe
 
     assert_deployment_safe(_settings_with(environment="production",
-                                          metadata_database_url=_PG))
+                                          metadata_database_url=_PG,
+                                          allowed_database_hosts="db"))
 
 
 def test_development_with_sqlite_metadata_still_starts():
@@ -386,3 +387,49 @@ def test_environment_value_is_matched_case_insensitively():
                        metadata_database_url="sqlite:///./app_metadata.db")
     with pytest.raises(UnsafeDeploymentConfig):
         assert_deployment_safe(s)
+
+
+def test_production_with_an_empty_host_allowlist_refuses_to_start():
+    """Empty means "any host", which is an SSRF hole rather than a default."""
+    from backend.utils.config import UnsafeDeploymentConfig, assert_deployment_safe
+
+    s = _settings_with(environment="production", metadata_database_url=_PG,
+                       allowed_database_hosts="")
+    with pytest.raises(UnsafeDeploymentConfig) as excinfo:
+        assert_deployment_safe(s)
+    assert "ALLOWED_DATABASE_HOSTS" in str(excinfo.value)
+
+
+def test_production_reports_every_problem_at_once():
+    """Fixing one problem per redeploy is a miserable way to find the rest."""
+    from backend.utils.config import UnsafeDeploymentConfig, assert_deployment_safe
+
+    s = _settings_with(environment="production",
+                       metadata_database_url="sqlite:///./app_metadata.db",
+                       allowed_database_hosts="")
+    with pytest.raises(UnsafeDeploymentConfig) as excinfo:
+        assert_deployment_safe(s)
+    message = str(excinfo.value)
+    assert "METADATA_DATABASE_URL" in message and "ALLOWED_DATABASE_HOSTS" in message
+
+
+def test_in_memory_vector_store_warns_but_does_not_block(caplog):
+    """A deployment that never uses RAG is entitled to the in-memory store; a
+    check that blocks it would get switched off, and then protects nothing."""
+    from backend.utils.config import assert_deployment_safe
+
+    s = _settings_with(environment="production", metadata_database_url=_PG,
+                       allowed_database_hosts="db", vector_store="memory")
+    with caplog.at_level("WARNING"):
+        assert_deployment_safe(s)          # must not raise
+    assert any("VECTOR_STORE" in r.getMessage() for r in caplog.records)
+
+
+def test_chroma_vector_store_warns_about_nothing(caplog):
+    from backend.utils.config import assert_deployment_safe
+
+    s = _settings_with(environment="production", metadata_database_url=_PG,
+                       allowed_database_hosts="db", vector_store="chroma")
+    with caplog.at_level("WARNING"):
+        assert_deployment_safe(s)
+    assert not any("VECTOR_STORE" in r.getMessage() for r in caplog.records)

@@ -3,6 +3,10 @@ from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Safe to import here: logging_config imports nothing from this package, so
+# there is no cycle.
+from backend.utils.logging_config import logger
+
 
 class Settings(BaseSettings):
     app_name: str = "AI Data Analysis Agent"
@@ -101,7 +105,32 @@ def deployment_problems(settings: Settings) -> list[str]:
             "every deploy would silently discard all users, datasets, "
             "conversations and reports. Point it at Postgres."
         )
+    if not settings.allowed_database_hosts.strip():
+        problems.append(
+            "ALLOWED_DATABASE_HOSTS is empty, which permits any host. Any "
+            "authenticated user could then point /connect-database at internal "
+            "infrastructure. Set an explicit comma-separated allowlist."
+        )
     return problems
+
+
+def deployment_warnings(settings: Settings) -> list[str]:
+    """Return deployment concerns that are real but not unconditionally wrong.
+
+    Separate from `deployment_problems` on purpose. A check that refuses to
+    boot a legitimate deployment gets switched off, and a switched-off check
+    protects nothing -- so anything with a defensible production use stays a
+    warning.
+    """
+    warnings: list[str] = []
+    if settings.vector_store == "memory":
+        warnings.append(
+            "VECTOR_STORE=memory: uploaded documents are held in process and "
+            "lost on every restart. Set VECTOR_STORE=chroma with a persistent "
+            "CHROMA_PERSIST_DIR if the RAG features are in use. Harmless if "
+            "they are not."
+        )
+    return warnings
 
 
 def assert_deployment_safe(settings: Settings | None = None) -> None:
@@ -114,6 +143,12 @@ def assert_deployment_safe(settings: Settings | None = None) -> None:
     s = settings if settings is not None else get_settings()
     if s.environment.lower() != "production":
         return
+
+    # Logged before the raise: if several things are wrong, seeing all of them
+    # in one boot beats fixing them one redeploy at a time.
+    for warning in deployment_warnings(s):
+        logger.warning("Deployment warning: %s", warning)
+
     problems = deployment_problems(s)
     if problems:
         raise UnsafeDeploymentConfig(
