@@ -1,0 +1,28 @@
+# Both Dockerfiles use `COPY . .` with the repo root as build context
+# (docker-compose.yml), so anything not listed here is baked into the image.
+# Secrets are supplied at runtime instead -- via compose's `env_file`, or as
+# platform secrets when deployed.
+.env
+.env.*
+
+# Local runtime state: the vector store holds uploaded user documents.
+chroma_data/
+
+# Host virtualenv -- built for the host OS, useless (and large) in the image.
+.venv/
+
+.git/
+.gitignore
+.github/
+# Leading `**/` is required: .dockerignore patterns are not recursive by
+# default, so a bare `*.pyc` would only match at the build-context root.
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+
+# Not needed at runtime; CI runs pytest against the checkout, not the image.
+tests/
+docs/
+
+**/*.pdf
+medium-article-ai-data-analysis-agent.md
