@@ -73,6 +73,44 @@ Point the service at `railway.frontend.json`. It health-checks
 bakes in `API_URL=http://backend:8000` as a compose default; off compose that
 hostname does not resolve and every request fails.
 
+### Alternative: frontend on Streamlit Community Cloud
+
+Community Cloud runs a single `streamlit run` process, so it can host the
+frontend but not the backend. The backend still needs a container host; only
+the frontend service above is replaced.
+
+| Setting | Value |
+|---|---|
+| Repository / branch | `jumma786/ai-data-analysis-agent`, `main` |
+| Main file path | `frontend/streamlit_app.py` |
+| Python version | 3.11, matching CI |
+| Secrets (*Advanced settings*) | `API_URL = "https://<backend>.up.railway.app"` |
+
+Dependencies come from `frontend/requirements.txt`, not the root file:
+Community Cloud accepts a requirements file in the repository root *or* the
+entrypoint's directory, and prefers the latter. That is the whole reason the
+frontend list exists — the root file would install psycopg2, chromadb,
+langgraph and openai into a process that imports none of them.
+
+`API_URL` is read via `st.secrets` with an environment fallback
+(`_api_url()` in `streamlit_app.py`), because the Community Cloud docs do not
+promise that dashboard secrets appear in the environment.
+
+**This topology exposes the backend.** The all-Railway layout keeps it on the
+internal network with no public domain; here the Cloud runner reaches it over
+the internet, so you must generate a public domain for the backend service and
+it will receive unsolicited traffic. Two consequences:
+
+- `ENVIRONMENT=production` and a non-empty `ALLOWED_DATABASE_HOSTS` stop being
+  good practice and become the things standing between an internet-wide scanner
+  and `/connect-database`. The startup guard refuses to boot without them.
+- Signup is open to anyone who finds the backend URL. There is no invite code
+  and no admin role (see the README's known limitations), so treat any public
+  instance as a demo holding no data you would mind a stranger seeing.
+
+CORS still needs no configuration: Streamlit calls the API from the server side,
+so the browser never talks to the backend directly.
+
 ## 4. Smoke test
 
 1. `GET /health` on the backend

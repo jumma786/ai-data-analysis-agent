@@ -1,0 +1,12 @@
+# Frontend-only dependencies, for hosts that run *just* the Streamlit app
+# (Streamlit Community Cloud). Community Cloud prefers a requirements file in
+# the entrypoint's directory over the one at the repository root, so this file
+# is what it installs -- deliberately, because the root file pulls in the whole
+# backend: psycopg2, chromadb, langgraph, openai, reportlab, pytest. None of it
+# is imported here and installing it would slow every rebuild for nothing.
+#
+# The frontend talks to the backend over HTTP and imports nothing else. Keep
+# this list in sync with the imports at the top of streamlit_app.py.
+streamlit>=1.30
+requests>=2.31
+pandas>=2.0

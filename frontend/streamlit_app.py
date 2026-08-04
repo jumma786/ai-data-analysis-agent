@@ -9,7 +9,28 @@ import requests
 import pandas as pd
 import streamlit as st
 
-API_URL = os.getenv("API_URL", "http://localhost:8000")
+def _api_url() -> str:
+    """Base URL of the backend, from Streamlit secrets or the environment.
+
+    Three hosts, three mechanisms: `API_URL` in the environment locally and in
+    the Docker image, and `st.secrets` on Streamlit Community Cloud, whose docs
+    do not promise that dashboard secrets are mirrored into the environment.
+    Checking both keeps one file working everywhere without a deploy-time edit.
+
+    Reading `st.secrets` raises when no secrets file exists -- the normal local
+    case -- and the exception type has moved between Streamlit versions, so the
+    guard is deliberately broad. A trailing slash is stripped because it would
+    otherwise produce `//query` in every request path.
+    """
+    try:
+        if "API_URL" in st.secrets:
+            return str(st.secrets["API_URL"]).rstrip("/")
+    except Exception:            # No secrets file, or an unreadable one.
+        pass
+    return os.getenv("API_URL", "http://localhost:8000").rstrip("/")
+
+
+API_URL = _api_url()
 
 st.set_page_config(page_title="AI Data Analysis Agent", layout="wide")
 st.title("AI Data Analysis Agent")
