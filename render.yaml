@@ -1,0 +1,46 @@
+# Render blueprint for the backend service. The frontend is not here: it runs
+# on Streamlit Community Cloud (see docs/DEPLOYMENT.md), which is why only one
+# service is defined.
+#
+# Render's free web services spin down after 15 minutes without traffic and
+# take about a minute to wake, so the first request after an idle period is
+# slow. That is the price of the free tier; it is not a fault in the app.
+services:
+  - name: ai-data-analysis-agent-backend
+    type: web
+    runtime: docker
+    plan: free
+    dockerfilePath: ./docker/Dockerfile.backend
+    # Root, not ./docker -- the Dockerfile copies requirements.txt and the
+    # backend package from the repository root.
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      # Turns the three silent deployment traps into a refusal to boot for the
+      # two that can be checked. See assert_deployment_safe().
+      - key: ENVIRONMENT
+        value: production
+
+      # Generated once by Render as a random 256-bit value, so the signing key
+      # is neither committed nor invented by hand. Without it the app falls
+      # back to a per-process random key and tokens die on every restart.
+      - key: JWT_SECRET_KEY
+        generateValue: true
+
+      # sync: false means "prompt me in the dashboard, do not store it here".
+      # All four are either secrets or environment-specific.
+      #
+      # Both database URLs point at Neon rather than a Render database: Render's
+      # free Postgres is deleted 30 days after creation, which is precisely the
+      # silent data loss ENVIRONMENT=production exists to prevent.
+      - key: METADATA_DATABASE_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      # Must be non-empty under ENVIRONMENT=production. Set it to the analytics
+      # database's hostname; an empty allowlist lets any signed-in user point
+      # /connect-database at anything the server can reach.
+      - key: ALLOWED_DATABASE_HOSTS
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
