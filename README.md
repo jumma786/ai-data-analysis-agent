@@ -282,7 +282,7 @@ is one people switch off — at which point it protects nothing.
 ## Testing
 
 ```bash
-pytest tests/ -q                              # 133 passed, 12 skipped in CI
+pytest tests/ -q                              # 133 passed, 22 skipped in CI
 pytest tests/integration -m integration -q    # needs INTEGRATION_DATABASE_URL
 RUN_CHROMA_TESTS=1 pytest tests/test_rag_chroma.py -q   # 11 passed
 ```
