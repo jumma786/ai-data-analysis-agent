@@ -153,15 +153,20 @@ What this API still does *not* do, stated plainly:
   partitioned by user id — but all authenticated users have identical rights.
   There is no admin, no sharing, and no role hierarchy.
 - **The allowlist is not a complete SSRF defence.** It matches the hostname as
-  written and does not resolve DNS, so a permitted name pointing at an internal
-  address still passes, and DNS rebinding is not addressed. It is a coarse
-  boundary. It is also empty by default, which permits everything.
+  written, then resolves DNS and rejects known cloud-metadata addresses
+  (169.254.169.254 and similar) even for an allowlisted name. It deliberately
+  does not extend that check to ordinary private ranges, where self-hosted
+  databases legitimately live. Resolution happens at check time, not when the
+  driver actually connects, so DNS rebinding in that window is still
+  unaddressed. It is also empty by default, which permits any hostname.
 - **Access tokens cannot be revoked.** Only refresh tokens are tracked. A
   stolen access token works until it expires — bound the exposure with a short
   `ACCESS_TOKEN_EXPIRE_MINUTES`.
-- **Rate limiting is per-process and in-memory.** Multiple workers multiply the
-  effective limit, and a restart clears the counters. Move it to Redis or the
-  database before relying on it.
+- **Rate limiting is per-process unless `REDIS_URL` is set.** Without it,
+  multiple workers multiply the effective limit and a restart clears the
+  counters. With it, limits are shared across workers and survive a restart —
+  though they still only raise the cost of guessing, rather than defending
+  against an attacker spread across many source IPs.
 - **Per-user state is process-local.** The schema cache and in-memory document
   stores do not survive a restart and are not shared between workers. Use
   `VECTOR_STORE=chroma` for documents that need to persist.
