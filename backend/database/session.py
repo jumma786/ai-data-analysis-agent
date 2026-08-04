@@ -1,6 +1,6 @@
 """Engine / session management for the application metadata database.
 
-This is the database that holds users, datasets, conversations and reports --
+This is the database that holds users, refresh tokens, reports and documents --
 *not* the analytics database the agent queries on the user's behalf. Keeping the
 two separate is what lets the analytics connection use a read-only role.
 

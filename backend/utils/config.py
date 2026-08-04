@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     # ever issues SELECTs here; point it at a least-privilege read-only role.
     database_url: str = "postgresql+psycopg2://postgres:postgres@localhost:5432/analytics"
 
-    # Application metadata database: users, datasets, conversations, reports.
+    # Application metadata database: users, refresh tokens, reports, documents.
     # Deliberately separate from `database_url` so the analytics connection can
     # stay read-only. Defaults to a local SQLite file for zero-config demos.
     metadata_database_url: str = "sqlite:///./app_metadata.db"
@@ -102,8 +102,8 @@ def deployment_problems(settings: Settings) -> list[str]:
             "METADATA_DATABASE_URL is SQLite "
             f"({settings.metadata_database_url!r}), which is a file inside the "
             "container. Container filesystems do not survive a redeploy, so "
-            "every deploy would silently discard all users, datasets, "
-            "conversations and reports. Point it at Postgres."
+            "every deploy would silently discard all users, reports and "
+            "documents. Point it at Postgres."
         )
     if not settings.allowed_database_hosts.strip():
         problems.append(

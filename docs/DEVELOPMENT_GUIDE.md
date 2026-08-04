@@ -8,7 +8,8 @@
     generates a random per-process key and logs a warning; tokens then die on
     restart and cannot be verified by a second worker.
   - `JWT_ALGORITHM` (default `HS256`), `ACCESS_TOKEN_EXPIRE_MINUTES` (default 60).
-  - `METADATA_DATABASE_URL` — where users/datasets/conversations live. Defaults
+  - `METADATA_DATABASE_URL` — where users, refresh tokens, reports and
+    documents live. Defaults
     to `sqlite:///./app_metadata.db`. Kept separate from `DATABASE_URL` so the
     analytics connection can use a read-only role.
 

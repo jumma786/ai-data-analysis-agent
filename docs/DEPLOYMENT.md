@@ -118,14 +118,16 @@ Three defaults are chosen for zero-config local demos and are actively wrong in
 a deployment. All three fail *silently* — the app starts, serves traffic, and
 loses data later.
 
-**Set `ENVIRONMENT=production` and the first one becomes a startup failure
-instead of a silent one.** The other two are still on you.
+**Set `ENVIRONMENT=production`.** The first two then refuse to boot rather than
+failing silently, and all outstanding problems are reported in one startup so
+you fix them in one pass instead of one redeploy each. The third only warns —
+see below for why.
 
 ### Metadata storage is ephemeral by default
 
 `metadata_database_url` defaults to `sqlite:///./app_metadata.db`, a file inside
 the container. Container filesystems do not survive a redeploy, so **every
-deploy silently wipes all users, datasets, conversations and reports.** It
+deploy silently wipes all users, reports and documents.** It
 behaves perfectly right up until the first redeploy.
 
 Point `METADATA_DATABASE_URL` at Postgres. This is the single most important
@@ -143,7 +145,8 @@ later. The check lives in `assert_deployment_safe()`
 authenticated user can then point the server at internal infrastructure. Known
 cloud-metadata addresses are always blocked, but nothing else is.
 
-Set `ALLOWED_DATABASE_HOSTS` to an explicit comma-separated list.
+Set `ALLOWED_DATABASE_HOSTS` to an explicit comma-separated list. Under
+`ENVIRONMENT=production` an empty allowlist also blocks startup.
 
 ### RAG documents vanish on restart
 
@@ -154,6 +157,11 @@ container path that is equally ephemeral.
 
 Chroma also downloads an ONNX embedding model on first use, so expect a slow
 first request after switching.
+
+This one **warns rather than blocks**, deliberately: a deployment that never
+touches the RAG routes is entitled to the in-memory store, and a check that
+refuses a legitimate configuration is a check people switch off — at which
+point it protects nothing.
 
 ---
 

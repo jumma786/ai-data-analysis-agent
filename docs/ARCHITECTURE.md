@@ -7,8 +7,8 @@
    unsafe SQL. Sequential fallback runner when langgraph is absent.
 4. **Services** — LLM provider abstraction, schema introspection, profiling,
    report generation.
-5. **Persistence** — SQLAlchemy models for app metadata (users, datasets,
-   conversations, queries, reports, documents). The *analytics* database the
+5. **Persistence** — SQLAlchemy models for app metadata (users, refresh
+   tokens, reports, documents). The *analytics* database the
    user queries is separate and connected at runtime.
 
 ## Data flow (query)

@@ -9,7 +9,7 @@ prose.
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![LangGraph](https://img.shields.io/badge/LangGraph-1C3C3C)
 ![Postgres](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-129%20passing-success)
+![Tests](https://img.shields.io/badge/tests-133%20passing-success)
 ![Licence](https://img.shields.io/badge/licence-MIT-blue)
 
 ```
@@ -80,7 +80,8 @@ back to a sequential runner without LangGraph, and to an in-memory cosine store
 without ChromaDB. The unit suite therefore runs with no database, no network and
 no API key — which is what makes it trustworthy in CI.
 
-**Two databases, deliberately.** Application metadata (users, datasets) lives in
+**Two databases, deliberately.** Application metadata (users, refresh tokens,
+reports, documents) lives in
 `METADATA_DATABASE_URL`, separate from the analytics database in `DATABASE_URL`,
 so the analytics connection can stay read-only.
 
@@ -225,7 +226,7 @@ All via environment or `.env` (see `backend/utils/config.py`).
 | `OLLAMA_BASE_URL` / `OLLAMA_MODEL` | `localhost:11434` / `llama3` | |
 | `LLM_TIMEOUT_SECONDS` | `120` | **Raise well above this for local models** |
 | `DATABASE_URL` | local Postgres | Analytics DB; use a read-only role |
-| `METADATA_DATABASE_URL` | `sqlite:///./app_metadata.db` | Users, datasets |
+| `METADATA_DATABASE_URL` | `sqlite:///./app_metadata.db` | Users, refresh tokens, reports, documents |
 | `JWT_SECRET_KEY` | – | **Required in deployment**; see below |
 | `JWT_ALGORITHM` / `ACCESS_TOKEN_EXPIRE_MINUTES` | `HS256` / `60` | |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | `14` | Refresh tokens are revocable |
@@ -262,21 +263,26 @@ the app boots and serves traffic normally before losing anything:
 
 | Default | What happens deployed |
 |---|---|
-| `METADATA_DATABASE_URL` is SQLite | A file on an ephemeral filesystem: **every redeploy discards all users, datasets and reports** |
+| `METADATA_DATABASE_URL` is SQLite | A file on an ephemeral filesystem: **every redeploy discards all users, reports and documents** |
 | `ALLOWED_DATABASE_HOSTS` is empty | Any authenticated user can point `/connect-database` at internal infrastructure |
 | `VECTOR_STORE=memory` | Uploaded RAG documents are lost on restart |
 
-`ENVIRONMENT=production` converts the first into a startup failure —
+`ENVIRONMENT=production` converts the first two into startup failures —
 `assert_deployment_safe()` raises before `init_db()` creates tables in storage
 that is about to vanish, so the problem surfaces in deploy logs rather than as
-missing users a week later. The other two remain your responsibility.
+missing users a week later. Every outstanding problem is reported in one boot,
+not one per redeploy.
+
+The third only warns. A deployment that never touches the RAG routes is
+entitled to the in-memory store, and a check that refuses a legitimate config
+is one people switch off — at which point it protects nothing.
 
 ---
 
 ## Testing
 
 ```bash
-pytest tests/ -q                              # 129 passed, 12 skipped in CI
+pytest tests/ -q                              # 133 passed, 12 skipped in CI
 pytest tests/integration -m integration -q    # needs INTEGRATION_DATABASE_URL
 RUN_CHROMA_TESTS=1 pytest tests/test_rag_chroma.py -q   # 11 passed
 ```
