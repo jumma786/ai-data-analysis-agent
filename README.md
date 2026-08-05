@@ -251,8 +251,10 @@ All via environment or `.env` (see `backend/utils/config.py`).
 
 `docker-compose.yml` is for local development only — it hardcodes the Postgres
 password and reaches the backend at a compose-internal hostname. For a real
-host, both images already read `$PORT`, and `railway.backend.json` /
-`railway.frontend.json` describe the two services.
+host, both images already read `$PORT`. `render.yaml` describes the backend as a
+free Render service, with the frontend on Streamlit Community Cloud and Postgres
+on Neon; `railway.backend.json` / `railway.frontend.json` describe the same two
+services on a single host.
 
 Full guide, including the read-only `GRANT` block and the full environment
 table: **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
